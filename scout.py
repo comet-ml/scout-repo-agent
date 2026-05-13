@@ -428,6 +428,7 @@ def main() -> None:
     gh = Github(GITHUB_TOKEN)
     repo = gh.get_repo(f"{REPO_OWNER}/{REPO_NAME}")
     issue = repo.get_issue(ISSUE_NUMBER)
+    issue.create_reaction("eyes")
 
     logger.info("Issue: %s", issue.title)
 

@@ -86,13 +86,15 @@ if OPIK_API_KEY and OPIK_WORKSPACE:
     except Exception as e:
         logger.warning("Opik configuration failed, tracing disabled: %s", e)
 
+OPIK_PROJECT = f"scout-{REPO_OWNER}-{REPO_NAME}"
+
 _raw_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-client = track_anthropic(_raw_client, project_name="scout") if _opik_enabled else _raw_client
+client = track_anthropic(_raw_client, project_name=OPIK_PROJECT) if _opik_enabled else _raw_client
 
 # No-op decorator when Opik is disabled
 def _track_tool(fn):
     if _opik_enabled:
-        return opik.track(type="tool", project_name="scout")(fn)
+        return opik.track(type="tool", project_name=OPIK_PROJECT)(fn)
     return fn
 
 
@@ -365,7 +367,7 @@ def run_agent(issue_number: int) -> str:
         return "Scout reached the iteration limit without completing analysis."
 
     if _opik_enabled:
-        tracked = opik.track(name=f"scout-issue-{issue_number}", project_name="scout")(_agent)
+        tracked = opik.track(name=f"scout-issue-{issue_number}", project_name=OPIK_PROJECT)(_agent)
         return tracked()
     return _agent()
 

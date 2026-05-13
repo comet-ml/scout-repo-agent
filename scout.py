@@ -73,16 +73,27 @@ ISSUE_NUMBER = _get_issue_number()
 # Opik setup
 # ---------------------------------------------------------------------------
 
+_opik_enabled = False
 if OPIK_API_KEY and OPIK_WORKSPACE:
-    opik.configure(
-        api_key=OPIK_API_KEY,
-        workspace=OPIK_WORKSPACE,
-        force=True,
-        automatic_approvals=True,
-    )
+    try:
+        opik.configure(
+            api_key=OPIK_API_KEY,
+            workspace=OPIK_WORKSPACE,
+            force=True,
+            automatic_approvals=True,
+        )
+        _opik_enabled = True
+    except Exception as e:
+        logger.warning("Opik configuration failed, tracing disabled: %s", e)
 
 _raw_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-client = track_anthropic(_raw_client, project_name="scout")
+client = track_anthropic(_raw_client, project_name="scout") if _opik_enabled else _raw_client
+
+# No-op decorator when Opik is disabled
+def _track_tool(fn):
+    if _opik_enabled:
+        return opik.track(type="tool", project_name="scout")(fn)
+    return fn
 
 
 
@@ -100,7 +111,7 @@ issue: object
 # Tools
 # ---------------------------------------------------------------------------
 
-@opik.track(type="tool", project_name="scout")
+@_track_tool
 def search_issues(query: str, max_results: int = 10) -> list[dict]:
     """Search for issues in the repository matching a text query."""
     try:
@@ -119,7 +130,7 @@ def search_issues(query: str, max_results: int = 10) -> list[dict]:
         return [{"error": str(e)}]
 
 
-@opik.track(type="tool", project_name="scout")
+@_track_tool
 def list_directory(path: str = "") -> list[str]:
     """List files and directories at a path in the repository."""
     try:
@@ -134,7 +145,7 @@ def list_directory(path: str = "") -> list[str]:
         return [f"Error: {e.data.get('message', str(e))}"]
 
 
-@opik.track(type="tool", project_name="scout")
+@_track_tool
 def get_file_contents(path: str) -> str:
     """Read the contents of a file in the repository."""
     if ".." in path:
@@ -151,7 +162,7 @@ def get_file_contents(path: str) -> str:
         return f"Error: {e.data.get('message', str(e))}"
 
 
-@opik.track(type="tool", project_name="scout")
+@_track_tool
 def apply_label(label_name: str) -> str:
     """Apply a label to the current issue."""
     try:
@@ -353,8 +364,10 @@ def run_agent(issue_number: int) -> str:
 
         return "Scout reached the iteration limit without completing analysis."
 
-    tracked = opik.track(name=f"scout-issue-{issue_number}", project_name="scout")(_agent)
-    return tracked()
+    if _opik_enabled:
+        tracked = opik.track(name=f"scout-issue-{issue_number}", project_name="scout")(_agent)
+        return tracked()
+    return _agent()
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +400,7 @@ def main() -> None:
             pass
         sys.exit(1)
     finally:
-        if OPIK_API_KEY:
+        if _opik_enabled:
             opik.flush_tracker()
 
 

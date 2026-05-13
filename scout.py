@@ -294,7 +294,13 @@ def dispatch_tool(name: str, inputs: dict) -> str:
 
 SYSTEM_PROMPT = f"""You are Scout, an AI agent that triages GitHub issues for the {REPO_OWNER}/{REPO_NAME} repository.
 
-For each issue you will:
+Spam/off-topic rule: Before triaging, read the repository README provided in the issue context. If the issue is clearly spam, promotional content, or has nothing to do with the project described in the README (e.g. unrelated product pitches, generic requests, gibberish), skip the full triage and respond ONLY with:
+
+Hi, I'm Scout 🦉, the {REPO_OWNER}/{REPO_NAME} repository agent.
+
+This repository is for [one sentence describing the repo's purpose from the README]. This issue doesn't appear to be related to the project — a maintainer will review it shortly.
+
+For each legitimate issue you will:
 1. SEARCH — use search_issues to find similar bugs, duplicate reports, existing workarounds, and relevant prior discussions.
 2. INVESTIGATE — use list_directory and get_file_contents to locate where in the codebase the problem lives. Find the relevant files, classes, and functions.
 3. RESPOND — based on what you find, write a structured comment (format below).
@@ -324,7 +330,21 @@ Be direct and technical. Link to related issues by number (e.g. #42). Do not be 
 """
 
 
-def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None) -> str:
+def fetch_readme() -> str | None:
+    """Return the text of the repo's README, or None if not found."""
+    for candidate in ("README.md", "README.rst", "README.txt", "README"):
+        try:
+            content = repo.get_contents(candidate)
+            if isinstance(content, list):
+                continue
+            text = content.decoded_content.decode("utf-8", errors="replace")
+            return text[:3000] + ("\n... [truncated]" if len(text) > 3000 else "")
+        except GithubException:
+            continue
+    return None
+
+
+def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None, readme: str | None = None) -> str:
     comments_text = ""
     if issue_data["comments"]:
         formatted = "\n\n".join(
@@ -337,12 +357,15 @@ def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None) 
         tree_lines = "\n".join(f"  {entry}" for entry in repo_tree)
         repo_tree_text = f"\n\nRepository root:\n{tree_lines}"
 
+    readme_text = f"\n\nRepository README:\n{readme}" if readme else ""
+
     return (
         f"Issue #{issue_data['number']}: {issue_data['title']}\n\n"
         f"Reporter: @{issue_data['author']}\n"
         f"Labels: {', '.join(issue_data['labels']) or 'none'}\n"
         f"State: {issue_data['state']}"
-        f"{repo_tree_text}\n\n"
+        f"{repo_tree_text}"
+        f"{readme_text}\n\n"
         f"{issue_data['body'] or '(no description provided)'}"
         f"{comments_text}\n\n"
         "Please triage this issue."
@@ -375,7 +398,8 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
     def _agent():
         issue_data = get_issue_data(issue)
         repo_tree = list_directory("")
-        messages = [{"role": "user", "content": build_initial_message(issue_data, repo_tree)}]
+        readme = fetch_readme()
+        messages = [{"role": "user", "content": build_initial_message(issue_data, repo_tree, readme)}]
 
         for iteration in range(MAX_ITERATIONS):
             logger.info("Iteration %d/%d", iteration + 1, MAX_ITERATIONS)

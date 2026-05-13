@@ -6,12 +6,9 @@ import json
 import logging
 import os
 import sys
-import time
 
 import anthropic
-import jwt
 import opik
-import requests
 from dotenv import load_dotenv
 from github import Github, GithubException
 from opik.integrations.anthropic import track_anthropic
@@ -34,8 +31,7 @@ def _require(name: str) -> str:
 
 
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
-SCOUT_APP_ID = os.environ.get("SCOUT_APP_ID", "")
-SCOUT_APP_PRIVATE_KEY = os.environ.get("SCOUT_APP_PRIVATE_KEY", "")
+GITHUB_TOKEN = _require("GITHUB_TOKEN")
 SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request")
 OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
 OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
@@ -89,52 +85,6 @@ _raw_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 client = track_anthropic(_raw_client, project_name="scout")
 
 
-# ---------------------------------------------------------------------------
-# GitHub App auth
-# ---------------------------------------------------------------------------
-
-def get_github_token() -> str:
-    """Mint a GitHub App JWT and exchange it for an installation access token."""
-    if not SCOUT_APP_ID or not SCOUT_APP_PRIVATE_KEY:
-        raise ValueError("SCOUT_APP_ID and SCOUT_APP_PRIVATE_KEY are required")
-
-    if os.path.isfile(SCOUT_APP_PRIVATE_KEY):
-        with open(SCOUT_APP_PRIVATE_KEY) as f:
-            private_key = f.read()
-    else:
-        private_key = SCOUT_APP_PRIVATE_KEY  # raw PEM content passed directly
-
-    now = int(time.time())
-    app_jwt = jwt.encode(
-        {"iat": now - 60, "exp": now + 600, "iss": SCOUT_APP_ID},
-        private_key,
-        algorithm="RS256",
-    )
-
-    headers = {
-        "Authorization": f"Bearer {app_jwt}",
-        "Accept": "application/vnd.github+json",
-    }
-
-    resp = requests.get(
-        "https://api.github.com/app/installations",
-        headers=headers,
-        timeout=30,
-    )
-    resp.raise_for_status()
-
-    for inst in resp.json():
-        if inst["account"]["login"].lower() == REPO_OWNER.lower():
-            resp = requests.post(
-                f"https://api.github.com/app/installations/{inst['id']}/access_tokens",
-                headers=headers,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            logger.info("GitHub App token obtained for installation under %s", REPO_OWNER)
-            return resp.json()["token"]
-
-    raise ValueError(f"No GitHub App installation found for owner: {REPO_OWNER}")
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +366,7 @@ def main() -> None:
 
     logger.info("Scout starting — issue #%d in %s/%s", ISSUE_NUMBER, REPO_OWNER, REPO_NAME)
 
-    token = get_github_token()
-    gh = Github(token)
+    gh = Github(GITHUB_TOKEN)
     repo = gh.get_repo(f"{REPO_OWNER}/{REPO_NAME}")
     issue = repo.get_issue(ISSUE_NUMBER)
 

@@ -23,9 +23,9 @@ In your repository settings, add:
 | Secret | Description |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
-| `SCOUT_APP_ID` | GitHub App ID |
-| `SCOUT_APP_PRIVATE_KEY` | GitHub App private key (PEM file contents, or path to file on runner) |
 | `OPIK_API_KEY` | Opik API key |
+
+> The `github.token` built-in is used for GitHub access — no personal access token or GitHub App required. Comments will appear as `github-actions[bot]`.
 
 **Variables** (`Settings → Secrets and variables → Actions → Variables`):
 | Variable | Description |
@@ -64,9 +64,8 @@ jobs:
         uses: comet-ml/scout-repo-agent@main
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
         env:
-          SCOUT_APP_ID: ${{ secrets.SCOUT_APP_ID }}
-          SCOUT_APP_PRIVATE_KEY: ${{ secrets.SCOUT_APP_PRIVATE_KEY }}
           SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG }}
           SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
           SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
@@ -85,8 +84,7 @@ The GitHub App must have these permissions:
 | Env var | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Anthropic API key |
-| `SCOUT_APP_ID` | yes | GitHub App ID |
-| `SCOUT_APP_PRIVATE_KEY` | yes | PEM file path or raw PEM contents |
+| `GITHUB_TOKEN` | yes | GitHub token — pass `${{ github.token }}` via the action input |
 | `SCOUT_GITHUB_REPO_OWNER` | yes | Repo owner login |
 | `SCOUT_GITHUB_REPO_NAME` | yes | Repo name |
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
@@ -114,8 +112,7 @@ python scout.py
 `.env.example`:
 ```
 ANTHROPIC_API_KEY=
-SCOUT_APP_ID=
-SCOUT_APP_PRIVATE_KEY=PATH/github_app_key.pem
+GITHUB_TOKEN=github_pat_...
 SCOUT_ESCALATION_TAG=Escalated request
 SCOUT_GITHUB_REPO_OWNER=owner
 SCOUT_GITHUB_REPO_NAME=name

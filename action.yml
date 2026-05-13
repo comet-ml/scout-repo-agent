@@ -6,6 +6,9 @@ inputs:
   anthropic_api_key:
     description: Anthropic API key for Claude
     required: true
+  github_token:
+    description: GitHub token with issues:write and contents:read permissions
+    required: true
 
 runs:
   using: composite
@@ -30,3 +33,4 @@ runs:
       run: python ${{ github.action_path }}/scout.py
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}

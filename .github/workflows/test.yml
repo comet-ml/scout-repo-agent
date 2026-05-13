@@ -17,17 +17,16 @@ jobs:
   test-scout:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      issues: write
+      contents: read
 
     steps:
       - name: Validate secrets
         env:
-          SCOUT_APP_ID: ${{ secrets.SCOUT_APP_ID }}
-          SCOUT_APP_PRIVATE_KEY: ${{ secrets.SCOUT_APP_PRIVATE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           MISSING=""
-          [ -z "$SCOUT_APP_ID" ] && MISSING="$MISSING SCOUT_APP_ID"
-          [ -z "$SCOUT_APP_PRIVATE_KEY" ] && MISSING="$MISSING SCOUT_APP_PRIVATE_KEY"
           [ -z "$ANTHROPIC_API_KEY" ] && MISSING="$MISSING ANTHROPIC_API_KEY"
           if [ -n "$MISSING" ]; then
             echo "::error::Missing required secrets:$MISSING"
@@ -42,9 +41,8 @@ jobs:
         uses: ./
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
         env:
-          SCOUT_APP_ID: ${{ secrets.SCOUT_APP_ID }}
-          SCOUT_APP_PRIVATE_KEY: ${{ secrets.SCOUT_APP_PRIVATE_KEY }}
           SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG || 'Escalated request' }}
           SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
           SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}

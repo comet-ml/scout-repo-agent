@@ -91,7 +91,7 @@ The GitHub App must have these permissions:
 | `OPIK_API_KEY` | no | Opik API key for tracing |
 | `OPIK_WORKSPACE` | no | Opik workspace name |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
-| `SCOUT_MODEL` | no | Claude model (default: `claude-opus-4-5`) |
+| `SCOUT_MODEL` | no | Claude model (default: `claude-sonnet-4-6`) |
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
 
 ## Testing

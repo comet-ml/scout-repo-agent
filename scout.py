@@ -37,7 +37,7 @@ GITHUB_TOKEN = _require("GITHUB_TOKEN")
 SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
 OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
 OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
-MODEL = os.environ.get("SCOUT_MODEL", "claude-opus-4-5")
+MODEL = os.environ.get("SCOUT_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = int(os.environ.get("SCOUT_MAX_TOKENS", "8096"))
 MAX_ITERATIONS = 15
 
@@ -271,6 +271,7 @@ TOOL_DEFINITIONS = [
             },
             "required": ["label_name"],
         },
+        "cache_control": {"type": "ephemeral"},
     },
 ]
 
@@ -317,11 +318,13 @@ Hi, I'm Scout 🦉, the {REPO_OWNER}/{REPO_NAME} repository agent. Let me look i
 
 [If your Next Steps include a concrete bug fix with specific code changes: add a final line such as "Feel free to open a pull request with this fix — the change is straightforward!"]
 
+When investigating source code, read all relevant files in a single batched tool call rather than fetching them one at a time.
+
 Be direct and technical. Link to related issues by number (e.g. #42). Do not be condescending.
 """
 
 
-def build_initial_message(issue_data: dict) -> str:
+def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None) -> str:
     comments_text = ""
     if issue_data["comments"]:
         formatted = "\n\n".join(
@@ -329,11 +332,17 @@ def build_initial_message(issue_data: dict) -> str:
         )
         comments_text = f"\n\n---\n**Comments ({len(issue_data['comments'])}):**\n\n{formatted}"
 
+    repo_tree_text = ""
+    if repo_tree:
+        tree_lines = "\n".join(f"  {entry}" for entry in repo_tree)
+        repo_tree_text = f"\n\nRepository root:\n{tree_lines}"
+
     return (
         f"Issue #{issue_data['number']}: {issue_data['title']}\n\n"
         f"Reporter: @{issue_data['author']}\n"
         f"Labels: {', '.join(issue_data['labels']) or 'none'}\n"
-        f"State: {issue_data['state']}\n\n"
+        f"State: {issue_data['state']}"
+        f"{repo_tree_text}\n\n"
         f"{issue_data['body'] or '(no description provided)'}"
         f"{comments_text}\n\n"
         "Please triage this issue."
@@ -365,7 +374,8 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
 
     def _agent():
         issue_data = get_issue_data(issue)
-        messages = [{"role": "user", "content": build_initial_message(issue_data)}]
+        repo_tree = list_directory("")
+        messages = [{"role": "user", "content": build_initial_message(issue_data, repo_tree)}]
 
         for iteration in range(MAX_ITERATIONS):
             logger.info("Iteration %d/%d", iteration + 1, MAX_ITERATIONS)
@@ -373,7 +383,7 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
             )

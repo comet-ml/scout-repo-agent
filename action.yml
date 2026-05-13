@@ -1,0 +1,32 @@
+name: Scout Issue Triage Agent
+description: AI agent that triages new GitHub issues using Claude and logs activity to Opik
+author: Comet (comet.com)
+
+inputs:
+  anthropic_api_key:
+    description: Anthropic API key for Claude
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: scout-pip-${{ hashFiles(format('{0}/requirements.txt', github.action_path)) }}
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r ${{ github.action_path }}/requirements.txt
+
+    - name: Run Scout
+      shell: bash
+      run: python ${{ github.action_path }}/scout.py
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}

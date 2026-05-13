@@ -302,6 +302,8 @@ Escalation rule: if the issue requires a major design decision — architectural
 
 Your comment must follow this exact structure:
 
+Hi, I'm Scout 🦉, the {REPO_OWNER}/{REPO_NAME} repository agent. Let me look into this.
+
 ## Solution / Workaround
 [If a solution or workaround exists: exact steps. If not: "No existing solution or workaround found."]
 
@@ -312,6 +314,8 @@ Your comment must follow this exact structure:
 [One of:
 - A concrete fix sketch: which file, which function, what to change
 - Why this requires a design decision (if you escalated, mention it was tagged for team review)]
+
+[If your Next Steps include a concrete bug fix with specific code changes: add a final line asking "Would you like me to open a pull request with this fix?"]
 
 Be direct and technical. Link to related issues by number (e.g. #42). Do not be condescending.
 """
@@ -380,6 +384,9 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
                 td = opik_context.get_current_trace_data()
                 if td:
                     trace_id[0] = td.id
+                    opik_context.update_current_trace(
+                        thread_id=f"issue-{REPO_OWNER}-{REPO_NAME}-{issue_number}"
+                    )
                 for block in response.content:
                     if hasattr(block, "text"):
                         return block.text

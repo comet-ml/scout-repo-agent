@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _require(name: str) -> str:
-    val = os.environ.get(name, "")
+    val = os.environ.get(name, "").strip()
     if not val:
         raise ValueError(f"Required environment variable {name!r} is not set")
     return val
@@ -32,7 +32,7 @@ def _require(name: str) -> str:
 
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
 GITHUB_TOKEN = _require("GITHUB_TOKEN")
-SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request")
+SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
 OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
 OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-opus-4-5")

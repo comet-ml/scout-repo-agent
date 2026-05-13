@@ -9,6 +9,8 @@ import sys
 
 import anthropic
 import opik
+import opik.opik_context as opik_context
+import requests as _requests
 from dotenv import load_dotenv
 from github import Github, GithubException
 from opik.integrations.anthropic import track_anthropic
@@ -87,6 +89,32 @@ if OPIK_API_KEY and OPIK_WORKSPACE:
         logger.warning("Opik configuration failed, tracing disabled: %s", e)
 
 OPIK_PROJECT = f"scout-{REPO_OWNER}-{REPO_NAME}"
+
+
+def _get_opik_project_id() -> str | None:
+    """Look up the Opik project UUID by name via REST API."""
+    try:
+        resp = _requests.get(
+            "https://www.comet.com/opik/api/v1/private/projects",
+            params={"page": 1, "size": 20, "name": OPIK_PROJECT},
+            headers={"authorization": OPIK_API_KEY, "Comet-Workspace": OPIK_WORKSPACE},
+            timeout=10,
+        )
+        for project in resp.json().get("content", []):
+            if project["name"] == OPIK_PROJECT:
+                return project["id"]
+    except Exception as e:
+        logger.debug("Could not fetch Opik project ID: %s", e)
+    return None
+
+
+def _build_opik_url(trace_id: str, project_id: str) -> str:
+    return (
+        f"https://www.comet.com/opik/{OPIK_WORKSPACE}/projects/{project_id}/logs"
+        f"?time_range=alltime&traces_filters=%5B%5D&size=100&height=small"
+        f"&trace={trace_id}&span=&trace_panel_filters=%5B%5D&thread="
+    )
+
 
 _raw_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 client = track_anthropic(_raw_client, project_name=OPIK_PROJECT) if _opik_enabled else _raw_client
@@ -327,7 +355,10 @@ def get_issue_data(issue_obj) -> dict:
 # Agent loop
 # ---------------------------------------------------------------------------
 
-def run_agent(issue_number: int) -> str:
+def run_agent(issue_number: int) -> tuple[str, str | None]:
+    """Run the agent and return (comment_text, opik_trace_id | None)."""
+    trace_id: list[str | None] = [None]  # mutable container to capture from inner scope
+
     def _agent():
         issue_data = get_issue_data(issue)
         messages = [{"role": "user", "content": build_initial_message(issue_data)}]
@@ -346,6 +377,9 @@ def run_agent(issue_number: int) -> str:
             messages.append({"role": "assistant", "content": response.content})
 
             if response.stop_reason == "end_turn":
+                td = opik_context.get_current_trace_data()
+                if td:
+                    trace_id[0] = td.id
                 for block in response.content:
                     if hasattr(block, "text"):
                         return block.text
@@ -368,8 +402,11 @@ def run_agent(issue_number: int) -> str:
 
     if _opik_enabled:
         tracked = opik.track(name=f"scout-issue-{issue_number}", project_name=OPIK_PROJECT)(_agent)
-        return tracked()
-    return _agent()
+        text = tracked()
+    else:
+        text = _agent()
+
+    return text, trace_id[0]
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +425,14 @@ def main() -> None:
     logger.info("Issue: %s", issue.title)
 
     try:
-        comment_text = run_agent(ISSUE_NUMBER)
+        comment_text, opik_trace_id = run_agent(ISSUE_NUMBER)
+        if opik_trace_id:
+            opik.flush_tracker()  # ensure trace is written before we query for the project ID
+            project_id = _get_opik_project_id()
+            if project_id:
+                opik_url = _build_opik_url(opik_trace_id, project_id)
+                comment_text += f"\n\n---\n*[View Scout trace in Opik]({opik_url})*"
+                logger.info("Opik trace: %s", opik_url)
         issue.create_comment(comment_text)
         logger.info("Comment posted to issue #%d", ISSUE_NUMBER)
     except Exception as e:
@@ -403,7 +447,7 @@ def main() -> None:
         sys.exit(1)
     finally:
         if _opik_enabled:
-            opik.flush_tracker()
+            opik.flush_tracker()  # flush any remaining spans (tools, etc.)
 
 
 if __name__ == "__main__":

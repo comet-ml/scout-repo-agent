@@ -1,6 +1,6 @@
 # Scout 🦉
 
-Scout is a GitHub Action that triages new issues using Claude. When an issue is opened, Scout:
+Scout is a GitHub Action that triages new issues using Anthropic. When an issue is opened, Scout:
 
 1. Searches for similar issues and existing workarounds
 2. Explores the source code to find where the problem lives
@@ -91,7 +91,7 @@ The GitHub App must have these permissions:
 | `OPIK_API_KEY` | no | Opik API key for tracing |
 | `OPIK_WORKSPACE` | no | Opik workspace name |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
-| `SCOUT_MODEL` | no | Claude model (default: `claude-sonnet-4-6`) |
+| `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
 
 ## Testing

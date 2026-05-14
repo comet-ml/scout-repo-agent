@@ -1,4 +1,4 @@
-# Scout
+# Scout 🦉
 
 Scout is a GitHub Action that triages new issues using Claude. When an issue is opened, Scout:
 

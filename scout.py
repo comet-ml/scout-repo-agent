@@ -476,7 +476,7 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
         return "Scout reached the iteration limit without completing analysis."
 
     if _opik_enabled:
-        tracked = opik.track(name=f"scout-issue-{issue_number}", project_name=OPIK_PROJECT)(_agent)
+        tracked = opik.track(name=f"scout-issue-{issue_number}", project_name=OPIK_PROJECT, tags=["scout-repo-agent"])(_agent)
         text = tracked()
     else:
         text = _agent()

@@ -136,6 +136,27 @@ Then pass it to Scout in your workflow:
           SCOUT_PROMPT_FILE: ${{ github.workspace }}/.github/scout-prompt.txt
 ```
 
+**Example: inline prompt via `SCOUT_SYSTEM_PROMPT`**
+
+For shorter prompts you can set the value directly as a GitHub Actions variable (`Settings → Secrets and variables → Actions → Variables`):
+
+```yaml
+      - name: Run Scout
+        uses: comet-ml/scout-repo-agent@main
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+        env:
+          SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG }}
+          SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
+          SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
+          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+          SCOUT_SYSTEM_PROMPT: ${{ vars.SCOUT_SYSTEM_PROMPT }}
+```
+
+> When both `SCOUT_SYSTEM_PROMPT` and `SCOUT_PROMPT_FILE` are set, `SCOUT_SYSTEM_PROMPT` takes precedence.
+
 ## Testing
 
 Use the manual trigger workflow in this repo's Actions tab (`Test Scout (Manual)`) to run Scout against a specific issue number before enabling the automatic trigger.

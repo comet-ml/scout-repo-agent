@@ -91,7 +91,7 @@ if OPIK_API_KEY and OPIK_WORKSPACE:
     except Exception as e:
         logger.warning("Opik configuration failed, tracing disabled: %s", e)
 
-OPIK_PROJECT = f"scout-{REPO_OWNER}-{REPO_NAME}"
+OPIK_PROJECT = f"scout:{REPO_OWNER}/{REPO_NAME}"
 
 
 def _get_opik_project_id() -> str | None:

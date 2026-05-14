@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+from string import Template
 
 import anthropic
 import opik
@@ -35,6 +36,8 @@ def _require(name: str) -> str:
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
 GITHUB_TOKEN = _require("GITHUB_TOKEN")
 SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
+SCOUT_SYSTEM_PROMPT_OVERRIDE = os.environ.get("SCOUT_SYSTEM_PROMPT", "").strip()
+SCOUT_PROMPT_FILE = os.environ.get("SCOUT_PROMPT_FILE", "").strip()
 OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
 OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-sonnet-4-6")
@@ -194,12 +197,19 @@ def get_file_contents(path: str) -> str:
 
 @_track_tool
 def apply_label(label_name: str) -> str:
-    """Apply a label to the current issue."""
+    """Apply a label to the current issue, creating it if it doesn't exist."""
     try:
         issue.add_to_labels(label_name)
         return f"Label '{label_name}' applied to issue #{ISSUE_NUMBER}"
     except GithubException as e:
-        return f"Error applying label '{label_name}': {e.data.get('message', str(e))} — ensure the label exists in the repo"
+        if e.status == 422:
+            try:
+                repo.create_label(label_name, "e11d48")
+                issue.add_to_labels(label_name)
+                return f"Label '{label_name}' created and applied to issue #{ISSUE_NUMBER}"
+            except GithubException as e2:
+                return f"Error creating label '{label_name}': {e2.data.get('message', str(e2))}"
+        return f"Error applying label '{label_name}': {e.data.get('message', str(e))}"
 
 
 TOOL_DEFINITIONS = [
@@ -292,11 +302,12 @@ def dispatch_tool(name: str, inputs: dict) -> str:
 # Prompts
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = f"""You are Scout, an AI agent that triages GitHub issues for the {REPO_OWNER}/{REPO_NAME} repository.
+_DEFAULT_SYSTEM_PROMPT = """\
+You are Scout, an AI agent that triages GitHub issues for the $repo_owner/$repo_name repository.
 
 Spam/off-topic rule: Before triaging, read the repository README provided in the issue context. If the issue is clearly spam, promotional content, or has nothing to do with the project described in the README (e.g. unrelated product pitches, generic requests, gibberish), skip the full triage and respond ONLY with:
 
-Hi, I'm Scout 🦉, the {REPO_OWNER}/{REPO_NAME} repository agent.
+Hi, I'm Scout 🦉, the $repo_owner/$repo_name repository agent.
 
 This repository is for [one sentence describing the repo's purpose from the README]. This issue doesn't appear to be related to the project — a maintainer will review it shortly.
 
@@ -305,11 +316,11 @@ For each legitimate issue you will:
 2. INVESTIGATE — use list_directory and get_file_contents to locate where in the codebase the problem lives. Find the relevant files, classes, and functions.
 3. RESPOND — based on what you find, write a structured comment (format below).
 
-Escalation rule: if the issue requires a major design decision — architectural change, breaking API modification, significant cross-cutting scope — call apply_label("{SCOUT_ESCALATION_TAG}") BEFORE writing your comment, then explain the design complexity in the Next Steps section.
+Escalation rule: if the issue requires a major design decision — architectural change, breaking API modification, significant cross-cutting scope — call apply_label("$escalation_tag") BEFORE writing your comment, then explain the design complexity in the Next Steps section.
 
 Your comment must follow this exact structure:
 
-Hi, I'm Scout 🦉, the {REPO_OWNER}/{REPO_NAME} repository agent. Let me look into this.
+Hi, I'm Scout 🦉, the $repo_owner/$repo_name repository agent. Let me look into this.
 
 ## Solution / Workaround
 [If a solution or workaround exists: exact steps. If not: "No existing solution or workaround found."]
@@ -328,6 +339,24 @@ When investigating source code, read all relevant files in a single batched tool
 
 Be direct and technical. Link to related issues by number (e.g. #42). Do not be condescending.
 """
+
+
+def _load_system_prompt() -> str:
+    if SCOUT_SYSTEM_PROMPT_OVERRIDE:
+        raw = SCOUT_SYSTEM_PROMPT_OVERRIDE
+    elif SCOUT_PROMPT_FILE:
+        with open(SCOUT_PROMPT_FILE) as f:
+            raw = f.read()
+    else:
+        raw = _DEFAULT_SYSTEM_PROMPT
+    return Template(raw).safe_substitute(
+        repo_owner=REPO_OWNER,
+        repo_name=REPO_NAME,
+        escalation_tag=SCOUT_ESCALATION_TAG,
+    )
+
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 
 def fetch_readme() -> str | None:

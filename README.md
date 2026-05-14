@@ -11,11 +11,7 @@ Activity is traced to [Opik](https://opik.com) for observability.
 
 ## Setup
 
-### 1. Create the escalation label
-
-In the target repository, create a label matching your `SCOUT_ESCALATION_TAG` value (e.g. `Escalated request`). Scout will apply this label to issues that require major design decisions.
-
-### 2. Configure secrets and variables
+### 1. Configure secrets and variables
 
 In your repository settings, add:
 
@@ -35,7 +31,7 @@ In your repository settings, add:
 | `SCOUT_ESCALATION_TAG` | Label name for escalated issues (e.g. `Escalated request`) |
 | `OPIK_WORKSPACE` | Opik workspace name |
 
-### 3. Add the workflow
+### 2. Add the workflow
 
 Create `.github/workflows/scout.yml` in your target repository:
 
@@ -93,6 +89,8 @@ The GitHub App must have these permissions:
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
 | `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
+| `SCOUT_SYSTEM_PROMPT` | no | Override the system prompt inline. Supports `$repo_owner`, `$repo_name`, `$escalation_tag` placeholders. |
+| `SCOUT_PROMPT_FILE` | no | Path to a file containing the system prompt (same placeholders supported). Takes effect only when `SCOUT_SYSTEM_PROMPT` is not set. |
 
 ## Testing
 
@@ -119,4 +117,7 @@ SCOUT_GITHUB_REPO_NAME=name
 ISSUE_NUMBER=123
 OPIK_WORKSPACE=comet-all
 OPIK_API_KEY=
+# Optional: override the system prompt (supports $repo_owner, $repo_name, $escalation_tag)
+# SCOUT_SYSTEM_PROMPT=
+# SCOUT_PROMPT_FILE=
 ```

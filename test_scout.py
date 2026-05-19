@@ -64,13 +64,20 @@ class TestGetIssueNumber:
         event = {"issue": {"number": 7}}
         event_file = tmp_path / "event.json"
         event_file.write_text(json.dumps(event))
-        with patch.dict(os.environ, {"ISSUE_NUMBER": "", "GITHUB_EVENT_PATH": str(event_file)}):
-            # Remove ISSUE_NUMBER key entirely so the function falls through to the file
-            env = dict(os.environ)
-            env.pop("ISSUE_NUMBER", None)
-            with patch.dict(os.environ, env, clear=True):
-                os.environ["GITHUB_EVENT_PATH"] = str(event_file)
-                assert scout._get_issue_number() == 7
+        env = {k: v for k, v in os.environ.items() if k != "ISSUE_NUMBER"}
+        env["GITHUB_EVENT_PATH"] = str(event_file)
+        with patch.dict(os.environ, env, clear=True):
+            assert scout._get_issue_number() == 7
+
+    def test_empty_env_falls_through_to_event_file(self, tmp_path):
+        # Workflows commonly pass `${{ github.event.inputs.foo }}`, which is the
+        # empty string on triggers that don't carry that input. Empty must be
+        # treated as unset so auto-detection from the event payload still works.
+        event = {"issue": {"number": 11}}
+        event_file = tmp_path / "event.json"
+        event_file.write_text(json.dumps(event))
+        with patch.dict(os.environ, {"ISSUE_NUMBER": "", "GITHUB_EVENT_PATH": str(event_file)}, clear=True):
+            assert scout._get_issue_number() == 11
 
     def test_raises_when_missing(self):
         env = {k: v for k, v in os.environ.items() if k not in ("ISSUE_NUMBER", "GITHUB_EVENT_PATH")}

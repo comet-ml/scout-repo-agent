@@ -60,8 +60,11 @@ def _get_repo_owner_name() -> tuple[str, str]:
 
 def _get_issue_number() -> int:
     """Resolve issue number from ISSUE_NUMBER or the GitHub Actions event payload."""
-    if "ISSUE_NUMBER" in os.environ:
-        return int(os.environ["ISSUE_NUMBER"])
+    # Treat empty as unset: workflows often pass `${{ github.event.inputs.foo }}`,
+    # which evaluates to "" on triggers that don't carry the input.
+    issue_env = os.environ.get("ISSUE_NUMBER", "").strip()
+    if issue_env:
+        return int(issue_env)
     event_path = os.environ.get("GITHUB_EVENT_PATH", "")
     if event_path and os.path.isfile(event_path):
         with open(event_path) as f:

@@ -41,10 +41,16 @@ name: Scout Issue Triage
 on:
   issues:
     types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        required: true
+        type: number
 
 # One Scout run per issue at a time
 concurrency:
-  group: scout-issue-${{ github.event.issue.number }}
+  group: scout-issue-${{ github.event.issue.number || github.event.inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -67,6 +73,7 @@ jobs:
           SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
           OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
           OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
 ```
 
 ## GitHub App requirements

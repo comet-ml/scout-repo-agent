@@ -46,6 +46,6 @@ jobs:
           SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG || 'Escalated request' }}
           SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
           SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
-          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_API_KEY: ${{ secrets.SCOUT_OPIK_API_KEY }}
           OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
           ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}

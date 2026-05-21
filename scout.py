@@ -381,7 +381,19 @@ def fetch_readme() -> str | None:
     return None
 
 
-def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None, readme: str | None = None) -> str:
+def build_repo_context(repo_tree: list[str] | None, readme: str | None) -> str:
+    """Build the static repo context block that goes into the system prompt."""
+    parts = []
+    if repo_tree:
+        tree_lines = "\n".join(f"  {entry}" for entry in repo_tree)
+        parts.append(f"Repository root:\n{tree_lines}")
+    if readme:
+        parts.append(f"Repository README:\n{readme}")
+    return "\n\n".join(parts)
+
+
+def build_issue_message(issue_data: dict) -> str:
+    """Build the user turn message containing only the issue itself."""
     comments_text = ""
     if issue_data["comments"]:
         formatted = "\n\n".join(
@@ -389,20 +401,11 @@ def build_initial_message(issue_data: dict, repo_tree: list[str] | None = None, 
         )
         comments_text = f"\n\n---\n**Comments ({len(issue_data['comments'])}):**\n\n{formatted}"
 
-    repo_tree_text = ""
-    if repo_tree:
-        tree_lines = "\n".join(f"  {entry}" for entry in repo_tree)
-        repo_tree_text = f"\n\nRepository root:\n{tree_lines}"
-
-    readme_text = f"\n\nRepository README:\n{readme}" if readme else ""
-
     return (
         f"Issue #{issue_data['number']}: {issue_data['title']}\n\n"
         f"Reporter: @{issue_data['author']}\n"
         f"Labels: {', '.join(issue_data['labels']) or 'none'}\n"
-        f"State: {issue_data['state']}"
-        f"{repo_tree_text}"
-        f"{readme_text}\n\n"
+        f"State: {issue_data['state']}\n\n"
         f"{issue_data['body'] or '(no description provided)'}"
         f"{comments_text}\n\n"
         "Please triage this issue."
@@ -436,7 +439,13 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
         issue_data = get_issue_data(issue)
         repo_tree = list_directory("")
         readme = fetch_readme()
-        messages = [{"role": "user", "content": build_initial_message(issue_data, repo_tree, readme)}]
+        repo_context = build_repo_context(repo_tree, readme)
+        messages = [{"role": "user", "content": build_issue_message(issue_data)}]
+
+        system = [
+            {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": repo_context, "cache_control": {"type": "ephemeral"}},
+        ]
 
         for iteration in range(MAX_ITERATIONS):
             logger.info("Iteration %d/%d", iteration + 1, MAX_ITERATIONS)
@@ -444,7 +453,7 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+                system=system,
                 tools=TOOL_DEFINITIONS,
                 messages=messages,
             )

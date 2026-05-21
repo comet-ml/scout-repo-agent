@@ -229,10 +229,34 @@ class TestGetFileContents:
 
 
 # ---------------------------------------------------------------------------
-# build_initial_message
+# build_repo_context
 # ---------------------------------------------------------------------------
 
-class TestBuildInitialMessage:
+class TestBuildRepoContext:
+    def test_contains_repo_tree(self):
+        result = scout.build_repo_context(["src/", "README.md"], None)
+        assert "src/" in result
+        assert "README.md" in result
+
+    def test_contains_readme(self):
+        result = scout.build_repo_context(None, "This project does X.")
+        assert "This project does X." in result
+
+    def test_contains_both(self):
+        result = scout.build_repo_context(["src/"], "My README.")
+        assert "src/" in result
+        assert "My README." in result
+
+    def test_empty_when_both_none(self):
+        result = scout.build_repo_context(None, None)
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# build_issue_message
+# ---------------------------------------------------------------------------
+
+class TestBuildIssueMessage:
     def _issue(self, **overrides):
         base = {
             "number": 1,
@@ -247,30 +271,26 @@ class TestBuildInitialMessage:
         return base
 
     def test_contains_title_and_body(self):
-        msg = scout.build_initial_message(self._issue())
+        msg = scout.build_issue_message(self._issue())
         assert "Something broke" in msg
         assert "It does not work." in msg
 
     def test_contains_comments(self):
         issue = self._issue(comments=[{"author": "alice", "body": "Me too!"}])
-        msg = scout.build_initial_message(issue)
+        msg = scout.build_issue_message(issue)
         assert "alice" in msg
         assert "Me too!" in msg
 
-    def test_contains_repo_tree(self):
-        msg = scout.build_initial_message(self._issue(), repo_tree=["src/", "README.md"])
-        assert "src/" in msg
-        assert "README.md" in msg
-
-    def test_contains_readme(self):
-        msg = scout.build_initial_message(self._issue(), readme="This project does X.")
-        assert "This project does X." in msg
+    def test_does_not_contain_repo_tree_or_readme(self):
+        msg = scout.build_issue_message(self._issue())
+        assert "Repository root" not in msg
+        assert "Repository README" not in msg
 
     def test_labels_shown(self):
-        msg = scout.build_initial_message(self._issue(labels=["bug", "help wanted"]))
+        msg = scout.build_issue_message(self._issue(labels=["bug", "help wanted"]))
         assert "bug" in msg
         assert "help wanted" in msg
 
     def test_no_labels_shows_none(self):
-        msg = scout.build_initial_message(self._issue(labels=[]))
+        msg = scout.build_issue_message(self._issue(labels=[]))
         assert "none" in msg

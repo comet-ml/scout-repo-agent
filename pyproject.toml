@@ -1,0 +1,17 @@
+[project]
+name = "scout-repo-agent"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.40.0",
+    "PyGithub>=2.0",
+    "requests>=2.28",
+    "opik>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

@@ -315,9 +315,12 @@ Hi, I'm Scout 🦉, the $repo_owner/$repo_name repository agent.
 This repository is for [one sentence describing the repo's purpose from the README]. This issue doesn't appear to be related to the project — a maintainer will review it shortly.
 
 For each legitimate issue you will:
-1. SEARCH — use search_issues to find similar bugs, duplicate reports, existing workarounds, and relevant prior discussions.
-2. INVESTIGATE — use list_directory and get_file_contents to locate where in the codebase the problem lives. Find the relevant files, classes, and functions.
-3. RESPOND — based on what you find, write a structured comment (format below).
+1. PLAN — before making any tool calls, write a 2–3 sentence investigation plan: which areas of the codebase are likely relevant and what files you expect to find. This prevents aimless exploration.
+2. SEARCH — use search_issues to find similar bugs, duplicate reports, existing workarounds, and relevant prior discussions.
+3. INVESTIGATE — use list_directory and get_file_contents to locate where in the codebase the problem lives. Find the relevant files, classes, and functions.
+4. RESPOND — based on what you find, write a structured comment (format below).
+
+Budget awareness: You have at most 15 tool-calling rounds. By round 10, stop exploring and begin writing your response using what you've found. An incomplete but substantive response is better than hitting the limit with no output.
 
 Escalation rule: if the issue requires a major design decision — architectural change, breaking API modification, significant cross-cutting scope — call apply_label("$escalation_tag") BEFORE writing your comment, then explain the design complexity in the Next Steps section.
 
@@ -340,7 +343,8 @@ Hi, I'm Scout 🦉, the $repo_owner/$repo_name repository agent. Let me look int
 
 When investigating source code:
 - The repository root contents are already in the issue context — do not call list_directory("") again.
-- When navigating, explore multiple directories in a single batched call rather than descending one level at a time. If the relevant subdirectory is obvious from the root tree, list it directly alongside other needed paths.
+- CRITICAL: Never list only a single directory per turn. Always batch at least 3 directory listings per turn, targeting the level where relevant files are likely to live (e.g., list the backend API handlers, frontend config pages, and test directories simultaneously). Descending one level at a time wastes your iteration budget.
+- Issue 4–5 tool calls per turn wherever possible — parallelism is far more efficient than sequential exploration.
 - Read all relevant source files in a single batched tool call rather than fetching them one at a time.
 - Focus on code files directly relevant to the reported behavior — skip data files (word lists, configs, assets) unless the issue is specifically about that data.
 - After identifying the relevant source, briefly check whether test coverage exists for the affected code (look in tests/ or similar) and note any gaps in your Code Investigation section.
@@ -475,6 +479,13 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
                             "content": result,
                         })
                 messages.append({"role": "user", "content": tool_results})
+
+            remaining = MAX_ITERATIONS - iteration - 1
+            if remaining == 5:
+                messages.append({
+                    "role": "user",
+                    "content": f"[System: {remaining} tool-calling rounds remaining. Stop exploring and begin writing your final response now.]",
+                })
 
         return "Scout reached the iteration limit without completing analysis."
 

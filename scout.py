@@ -439,12 +439,15 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
     """Run the agent and return (comment_text, opik_trace_id | None)."""
     trace_id: list[str | None] = [None]  # mutable container to capture from inner scope
 
-    def _agent():
-        issue_data = get_issue_data(issue)
+    issue_data = get_issue_data(issue)
+    issue_message = build_issue_message(issue_data)
+
+    def _agent(issue_message: str) -> str:
         repo_tree = list_directory("")
         readme = fetch_readme()
         repo_context = build_repo_context(repo_tree, readme)
-        messages = [{"role": "user", "content": build_issue_message(issue_data)}]
+
+        messages = [{"role": "user", "content": issue_message}]
 
         system = [
             {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
@@ -500,9 +503,9 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
 
     if _opik_enabled:
         tracked = opik.track(name=f"scout-issue-{issue_number}", project_name=OPIK_PROJECT, tags=["scout-repo-agent"])(_agent)
-        text = tracked()
+        text = tracked(issue_message)
     else:
-        text = _agent()
+        text = _agent(issue_message)
 
     return text, trace_id[0]
 

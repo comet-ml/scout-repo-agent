@@ -371,6 +371,14 @@ def _load_system_prompt() -> str:
 
 SYSTEM_PROMPT = _load_system_prompt()
 
+def clean_readme(text: str) -> str:
+    """Remove images and badges from README text."""
+    text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+    text = re.sub(r'<img\s[^>]*/?>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\s*\]\([^)]*\)', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 @opik.track(type="general",project_name=OPIK_PROJECT)
 def fetch_readme() -> str | None:
     """Return the text of the repo's README, or None if not found."""
@@ -379,11 +387,7 @@ def fetch_readme() -> str | None:
             content = repo.get_contents(candidate)
             if isinstance(content, list):
                 continue
-            text = content.decoded_content.decode("utf-8", errors="replace")
-            text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
-            text = re.sub(r'<img\s[^>]*/?>', '', text, flags=re.IGNORECASE)
-            text = re.sub(r'\[\s*\]\([^)]*\)', '', text)
-            text = re.sub(r'\n{3,}', '\n\n', text).strip()
+            text = clean_readme(content.decoded_content.decode("utf-8", errors="replace"))
             return text[:3000] + ("\n... [truncated]" if len(text) > 3000 else "")
         except GithubException:
             continue

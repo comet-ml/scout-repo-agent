@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 from string import Template
 
@@ -370,7 +371,7 @@ def _load_system_prompt() -> str:
 
 SYSTEM_PROMPT = _load_system_prompt()
 
-
+@opik.track(type="general",project_name=OPIK_PROJECT)
 def fetch_readme() -> str | None:
     """Return the text of the repo's README, or None if not found."""
     for candidate in ("README.md", "README.rst", "README.txt", "README"):
@@ -379,6 +380,10 @@ def fetch_readme() -> str | None:
             if isinstance(content, list):
                 continue
             text = content.decoded_content.decode("utf-8", errors="replace")
+            text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+            text = re.sub(r'<img\s[^>]*/?>', '', text, flags=re.IGNORECASE)
+            text = re.sub(r'\[\s*\]\([^)]*\)', '', text)
+            text = re.sub(r'\n{3,}', '\n\n', text).strip()
             return text[:3000] + ("\n... [truncated]" if len(text) > 3000 else "")
         except GithubException:
             continue

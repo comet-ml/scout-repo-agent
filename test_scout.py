@@ -229,6 +229,42 @@ class TestGetFileContents:
 
 
 # ---------------------------------------------------------------------------
+# clean_readme
+# ---------------------------------------------------------------------------
+
+class TestCleanReadme:
+    def test_strips_markdown_images(self):
+        result = scout.clean_readme("# Title\n\n![alt](https://example.com/img.png)\n\nSome text.")
+        assert "![" not in result
+        assert "Some text." in result
+
+    def test_strips_html_img_tags(self):
+        result = scout.clean_readme('# Title\n\n<img src="badge.svg" />\n\nSome text.')
+        assert "<img" not in result
+        assert "Some text." in result
+
+    def test_strips_badge_links(self):
+        result = scout.clean_readme("[![Build](https://ci/badge.svg)](https://ci/status)")
+        assert "![" not in result
+        assert "<img" not in result
+
+    def test_removes_empty_links_left_by_badge_stripping(self):
+        result = scout.clean_readme("[![](https://img)](https://link)")
+        assert "](https://" not in result
+
+    def test_collapses_blank_lines(self):
+        result = scout.clean_readme("Line one\n\n\n\nLine two")
+        assert "\n\n\n" not in result
+
+    def test_preserves_regular_links(self):
+        result = scout.clean_readme("See [the docs](https://docs.example.com) for details.")
+        assert "[the docs](https://docs.example.com)" in result
+
+    def test_empty_string(self):
+        assert scout.clean_readme("") == ""
+
+
+# ---------------------------------------------------------------------------
 # build_repo_context
 # ---------------------------------------------------------------------------
 

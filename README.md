@@ -98,6 +98,8 @@ The GitHub App must have these permissions:
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
 | `SCOUT_SYSTEM_PROMPT` | no | Override the system prompt inline. Supports `$repo_owner`, `$repo_name`, `$escalation_tag` placeholders. |
 | `SCOUT_PROMPT_FILE` | no | Path to a file containing the system prompt (same placeholders supported). Takes effect only when `SCOUT_SYSTEM_PROMPT` is not set. |
+| `SCOUT_OPIK_PROMPT_NAME` | no | Name of an Opik-managed prompt to use as the system prompt. Requires `OPIK_API_KEY` and `OPIK_WORKSPACE`. Variable syntax is Mustache (`{{repo_owner}}`, `{{repo_name}}`, `{{escalation_tag}}`). |
+| `SCOUT_OPIK_PROMPT_VERSION` | no | Pin a specific Opik prompt version (e.g. `v3`). Defaults to the latest version. |
 
 ## Customizing the system prompt
 
@@ -164,6 +166,39 @@ For shorter prompts you can set the value directly as a GitHub Actions variable 
 
 > When both `SCOUT_SYSTEM_PROMPT` and `SCOUT_PROMPT_FILE` are set, `SCOUT_SYSTEM_PROMPT` takes precedence.
 
+### Using an Opik-managed prompt
+
+You can store Scout's system prompt in [Opik](https://www.comet.com/opik) and reference it by name. This turns the prompt into a versioned artifact you can evaluate with Opik's Test Suite and improve with the Opik prompt optimizer, without having to redeploy the action.
+
+**Set up the prompt in Opik:**
+
+1. In the Opik UI, create a new prompt (e.g. named `scout-system-prompt`).
+2. Paste your prompt body. Use Mustache placeholders — `{{repo_owner}}`, `{{repo_name}}`, `{{escalation_tag}}` — anywhere you want runtime substitution. (Opik's default template type is Mustache.)
+3. Save. The first save creates version `v1`.
+
+**Reference it from the workflow:**
+
+```yaml
+      - name: Run Scout
+        uses: comet-ml/scout-repo-agent@main
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          opik_prompt_name: scout-system-prompt
+          # opik_prompt_version: v3  # optional; omit to use the latest version
+        env:
+          SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG }}
+          SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
+          SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
+          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+```
+
+**Precedence:** Opik > `SCOUT_SYSTEM_PROMPT` > `SCOUT_PROMPT_FILE` > built-in default. If `SCOUT_OPIK_PROMPT_NAME` is set but the fetch fails (network error, prompt not found, Opik not configured), Scout logs a warning and falls back to the next source so triage still runs.
+
+**Iterating:** edit the prompt in Opik to publish a new version. Without `SCOUT_OPIK_PROMPT_VERSION` set, the next Scout run picks it up automatically; with a pinned version, the run continues to use that version until you bump the value.
+
 ## Testing
 
 Use the manual trigger workflow in this repo's Actions tab (`Test Scout (Manual)`) to run Scout against a specific issue number before enabling the automatic trigger.
@@ -192,4 +227,7 @@ OPIK_API_KEY=
 # Optional: override the system prompt (supports $repo_owner, $repo_name, $escalation_tag)
 # SCOUT_SYSTEM_PROMPT=
 # SCOUT_PROMPT_FILE=
+# Optional: fetch the system prompt from Opik (Mustache {{repo_owner}}, {{repo_name}}, {{escalation_tag}})
+# SCOUT_OPIK_PROMPT_NAME=
+# SCOUT_OPIK_PROMPT_VERSION=
 ```

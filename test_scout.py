@@ -95,6 +95,9 @@ class TestLoadSystemPrompt:
         defaults = dict(
             SCOUT_SYSTEM_PROMPT_OVERRIDE="",
             SCOUT_PROMPT_FILE="",
+            SCOUT_OPIK_PROMPT_NAME="",
+            SCOUT_OPIK_PROMPT_VERSION="",
+            _opik_enabled=False,
             REPO_OWNER="test-owner",
             REPO_NAME="test-repo",
             SCOUT_ESCALATION_TAG="Escalated request",
@@ -143,6 +146,87 @@ class TestLoadSystemPrompt:
         )
         assert '{"key": "value"}' in result
         assert "acme" in result
+
+    def test_opik_prompt_used_when_configured(self):
+        mock_prompt = MagicMock()
+        mock_prompt.format.return_value = "Opik-rendered prompt for acme/widgets."
+        mock_client = MagicMock()
+        mock_client.get_prompt.return_value = mock_prompt
+        with patch("scout.opik.Opik", return_value=mock_client):
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=True,
+                REPO_OWNER="acme",
+                REPO_NAME="widgets",
+                SCOUT_ESCALATION_TAG="Escalated request",
+            )
+        assert result == "Opik-rendered prompt for acme/widgets."
+        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version=None)
+        mock_prompt.format.assert_called_once_with(
+            repo_owner="acme",
+            repo_name="widgets",
+            escalation_tag="Escalated request",
+        )
+
+    def test_opik_version_forwarded_when_set(self):
+        mock_prompt = MagicMock()
+        mock_prompt.format.return_value = "v3 prompt"
+        mock_client = MagicMock()
+        mock_client.get_prompt.return_value = mock_prompt
+        with patch("scout.opik.Opik", return_value=mock_client):
+            self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                SCOUT_OPIK_PROMPT_VERSION="v3",
+                _opik_enabled=True,
+            )
+        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version="v3")
+
+    def test_opik_takes_precedence_over_env_override(self):
+        mock_prompt = MagicMock()
+        mock_prompt.format.return_value = "Opik wins"
+        mock_client = MagicMock()
+        mock_client.get_prompt.return_value = mock_prompt
+        with patch("scout.opik.Opik", return_value=mock_client):
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=True,
+                SCOUT_SYSTEM_PROMPT_OVERRIDE="env prompt",
+            )
+        assert result == "Opik wins"
+
+    def test_opik_fetch_failure_falls_back_to_default(self):
+        mock_client = MagicMock()
+        mock_client.get_prompt.side_effect = RuntimeError("network down")
+        with patch("scout.opik.Opik", return_value=mock_client):
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=True,
+                REPO_OWNER="myorg",
+                REPO_NAME="myrepo",
+            )
+        assert "myorg/myrepo" in result
+
+    def test_opik_fetch_failure_falls_back_to_env_override(self):
+        mock_client = MagicMock()
+        mock_client.get_prompt.return_value = None  # treated as failure
+        with patch("scout.opik.Opik", return_value=mock_client):
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=True,
+                SCOUT_SYSTEM_PROMPT_OVERRIDE="fallback env prompt",
+            )
+        assert result == "fallback env prompt"
+
+    def test_opik_branch_skipped_when_disabled(self):
+        with patch("scout.opik.Opik") as opik_ctor:
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=False,
+                REPO_OWNER="myorg",
+                REPO_NAME="myrepo",
+            )
+        opik_ctor.assert_not_called()
+        assert "myorg/myrepo" in result
 
 
 # ---------------------------------------------------------------------------

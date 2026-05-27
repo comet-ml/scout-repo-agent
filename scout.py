@@ -38,6 +38,8 @@ GITHUB_TOKEN = _require("GITHUB_TOKEN")
 SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
 SCOUT_SYSTEM_PROMPT_OVERRIDE = os.environ.get("SCOUT_SYSTEM_PROMPT", "").strip()
 SCOUT_PROMPT_FILE = os.environ.get("SCOUT_PROMPT_FILE", "").strip()
+SCOUT_OPIK_PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "").strip()
+SCOUT_OPIK_PROMPT_VERSION = os.environ.get("SCOUT_OPIK_PROMPT_VERSION", "").strip()
 OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
 OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-sonnet-4-6")
@@ -353,7 +355,31 @@ Be direct and technical. Link to related issues by number (e.g. #42). Do not be 
 """
 
 
+def _fetch_opik_prompt():
+    """Fetch the configured prompt from Opik. Returns the Prompt object, or None on any failure."""
+    try:
+        version = SCOUT_OPIK_PROMPT_VERSION or None
+        return opik.Opik().get_prompt(name=SCOUT_OPIK_PROMPT_NAME, version=version)
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch Opik prompt %r (version=%r): %s — falling back to local sources",
+            SCOUT_OPIK_PROMPT_NAME,
+            SCOUT_OPIK_PROMPT_VERSION or "latest",
+            e,
+        )
+        return None
+
+
 def _load_system_prompt() -> str:
+    if SCOUT_OPIK_PROMPT_NAME and _opik_enabled:
+        prompt = _fetch_opik_prompt()
+        if prompt is not None:
+            return prompt.format(
+                repo_owner=REPO_OWNER,
+                repo_name=REPO_NAME,
+                escalation_tag=SCOUT_ESCALATION_TAG,
+            )
+
     if SCOUT_SYSTEM_PROMPT_OVERRIDE:
         raw = SCOUT_SYSTEM_PROMPT_OVERRIDE
     elif SCOUT_PROMPT_FILE:

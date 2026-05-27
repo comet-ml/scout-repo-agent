@@ -9,6 +9,14 @@ inputs:
   github_token:
     description: GitHub token with issues:write and contents:read permissions
     required: true
+  opik_prompt_name:
+    description: Name of an Opik-managed system prompt to use instead of the built-in default. Requires OPIK_API_KEY and OPIK_WORKSPACE to be set.
+    required: false
+    default: ''
+  opik_prompt_version:
+    description: Optional Opik prompt version to pin (e.g. 'v3'). If empty, fetches the latest version.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -34,3 +42,5 @@ runs:
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        SCOUT_OPIK_PROMPT_NAME: ${{ inputs.opik_prompt_name }}
+        SCOUT_OPIK_PROMPT_VERSION: ${{ inputs.opik_prompt_version }}

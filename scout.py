@@ -359,7 +359,11 @@ def _fetch_opik_prompt():
     """Fetch the configured prompt from Opik. Returns the Prompt object, or None on any failure."""
     try:
         version = SCOUT_OPIK_PROMPT_VERSION or None
-        return opik.Opik().get_prompt(name=SCOUT_OPIK_PROMPT_NAME, version=version)
+        return opik.Opik().get_prompt(
+            name=SCOUT_OPIK_PROMPT_NAME,
+            version=version,
+            project_name=OPIK_PROJECT,
+        )
     except Exception as e:
         logger.warning(
             "Failed to fetch Opik prompt %r (version=%r): %s — falling back to local sources",

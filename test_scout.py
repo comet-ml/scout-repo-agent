@@ -100,6 +100,7 @@ class TestLoadSystemPrompt:
             _opik_enabled=False,
             REPO_OWNER="test-owner",
             REPO_NAME="test-repo",
+            OPIK_PROJECT="scout:test-owner/test-repo",
             SCOUT_ESCALATION_TAG="Escalated request",
         )
         defaults.update(overrides)
@@ -158,7 +159,11 @@ class TestLoadSystemPrompt:
                 _opik_enabled=True,
             )
         assert result == "Verbatim Opik body for acme/widgets."
-        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version=None)
+        mock_client.get_prompt.assert_called_once_with(
+            name="scout-prompt",
+            version=None,
+            project_name="scout:test-owner/test-repo",
+        )
         mock_prompt.format.assert_not_called()
 
     def test_opik_prompt_returned_without_substitution(self):
@@ -188,7 +193,11 @@ class TestLoadSystemPrompt:
                 SCOUT_OPIK_PROMPT_VERSION="v3",
                 _opik_enabled=True,
             )
-        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version="v3")
+        mock_client.get_prompt.assert_called_once_with(
+            name="scout-prompt",
+            version="v3",
+            project_name="scout:test-owner/test-repo",
+        )
 
     def test_opik_takes_precedence_over_env_override(self):
         mock_prompt = MagicMock()

@@ -149,7 +149,23 @@ class TestLoadSystemPrompt:
 
     def test_opik_prompt_used_when_configured(self):
         mock_prompt = MagicMock()
-        mock_prompt.format.return_value = "Opik-rendered prompt for acme/widgets."
+        mock_prompt.prompt = "Verbatim Opik body for acme/widgets."
+        mock_client = MagicMock()
+        mock_client.get_prompt.return_value = mock_prompt
+        with patch("scout.opik.Opik", return_value=mock_client):
+            result = self._call(
+                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
+                _opik_enabled=True,
+            )
+        assert result == "Verbatim Opik body for acme/widgets."
+        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version=None)
+        mock_prompt.format.assert_not_called()
+
+    def test_opik_prompt_returned_without_substitution(self):
+        # The Opik body is used verbatim — placeholders like $repo_owner are
+        # passed through to the model untouched.
+        mock_prompt = MagicMock()
+        mock_prompt.prompt = "Triage for $repo_owner/$repo_name."
         mock_client = MagicMock()
         mock_client.get_prompt.return_value = mock_prompt
         with patch("scout.opik.Opik", return_value=mock_client):
@@ -158,19 +174,12 @@ class TestLoadSystemPrompt:
                 _opik_enabled=True,
                 REPO_OWNER="acme",
                 REPO_NAME="widgets",
-                SCOUT_ESCALATION_TAG="Escalated request",
             )
-        assert result == "Opik-rendered prompt for acme/widgets."
-        mock_client.get_prompt.assert_called_once_with(name="scout-prompt", version=None)
-        mock_prompt.format.assert_called_once_with(
-            repo_owner="acme",
-            repo_name="widgets",
-            escalation_tag="Escalated request",
-        )
+        assert result == "Triage for $repo_owner/$repo_name."
 
     def test_opik_version_forwarded_when_set(self):
         mock_prompt = MagicMock()
-        mock_prompt.format.return_value = "v3 prompt"
+        mock_prompt.prompt = "v3 prompt"
         mock_client = MagicMock()
         mock_client.get_prompt.return_value = mock_prompt
         with patch("scout.opik.Opik", return_value=mock_client):
@@ -183,7 +192,7 @@ class TestLoadSystemPrompt:
 
     def test_opik_takes_precedence_over_env_override(self):
         mock_prompt = MagicMock()
-        mock_prompt.format.return_value = "Opik wins"
+        mock_prompt.prompt = "Opik wins"
         mock_client = MagicMock()
         mock_client.get_prompt.return_value = mock_prompt
         with patch("scout.opik.Opik", return_value=mock_client):

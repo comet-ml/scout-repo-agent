@@ -374,11 +374,10 @@ def _load_system_prompt() -> str:
     if SCOUT_OPIK_PROMPT_NAME and _opik_enabled:
         prompt = _fetch_opik_prompt()
         if prompt is not None:
-            return prompt.format(
-                repo_owner=REPO_OWNER,
-                repo_name=REPO_NAME,
-                escalation_tag=SCOUT_ESCALATION_TAG,
-            )
+            # Use the Opik-stored body verbatim — no variable substitution.
+            # The prompt author is expected to write the repo name and any
+            # other repo-specific values directly into the prompt text.
+            return prompt.prompt
 
     if SCOUT_SYSTEM_PROMPT_OVERRIDE:
         raw = SCOUT_SYSTEM_PROMPT_OVERRIDE

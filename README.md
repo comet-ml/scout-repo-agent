@@ -98,8 +98,8 @@ The GitHub App must have these permissions:
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
 | `SCOUT_SYSTEM_PROMPT` | no | Override the system prompt inline. Supports `$repo_owner`, `$repo_name`, `$escalation_tag` placeholders. |
 | `SCOUT_PROMPT_FILE` | no | Path to a file containing the system prompt (same placeholders supported). Takes effect only when `SCOUT_SYSTEM_PROMPT` is not set. |
-| `SCOUT_OPIK_PROMPT_NAME` | no | Name of an Opik-managed prompt to use as the system prompt. Requires `OPIK_API_KEY` and `OPIK_WORKSPACE`. Variable syntax is Mustache (`{{repo_owner}}`, `{{repo_name}}`, `{{escalation_tag}}`). |
-| `SCOUT_OPIK_PROMPT_VERSION` | no | Pin a specific Opik prompt version (e.g. `v3`). Defaults to the latest version. |
+| `SCOUT_OPIK_PROMPT_NAME` | no | Name of an Opik-managed prompt to use as the system prompt. Requires `OPIK_API_KEY` and `OPIK_WORKSPACE`. The Opik body is used verbatim — no variable substitution is performed, so write repo-specific values (owner/name, escalation tag) directly into the prompt text. **For the GitHub Action, set via the `opik_prompt_name` action input rather than `env:` — see the Opik example below.** |
+| `SCOUT_OPIK_PROMPT_VERSION` | no | Pin a specific Opik prompt version (e.g. `v3`). Defaults to the latest version. **For the GitHub Action, set via the `opik_prompt_version` action input.** |
 
 ## Customizing the system prompt
 
@@ -173,7 +173,7 @@ You can store Scout's system prompt in [Opik](https://www.comet.com/opik) and re
 **Set up the prompt in Opik:**
 
 1. In the Opik UI, create a new prompt (e.g. named `scout-system-prompt`).
-2. Paste your prompt body. Use Mustache placeholders — `{{repo_owner}}`, `{{repo_name}}`, `{{escalation_tag}}` — anywhere you want runtime substitution. (Opik's default template type is Mustache.)
+2. Paste your prompt body. Scout uses it verbatim, so write any repo-specific values (owner, repo name, escalation tag) directly into the text rather than using template variables.
 3. Save. The first save creates version `v1`.
 
 **Reference it from the workflow:**
@@ -227,7 +227,7 @@ OPIK_API_KEY=
 # Optional: override the system prompt (supports $repo_owner, $repo_name, $escalation_tag)
 # SCOUT_SYSTEM_PROMPT=
 # SCOUT_PROMPT_FILE=
-# Optional: fetch the system prompt from Opik (Mustache {{repo_owner}}, {{repo_name}}, {{escalation_tag}})
+# Optional: fetch the system prompt from Opik (body used verbatim — no variable substitution)
 # SCOUT_OPIK_PROMPT_NAME=
 # SCOUT_OPIK_PROMPT_VERSION=
 ```

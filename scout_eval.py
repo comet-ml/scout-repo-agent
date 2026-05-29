@@ -12,7 +12,9 @@ assertions can grade both the output and what Scout did.
 
 Env vars (in addition to scout.py's normal config):
     SCOUT_TEST_SUITE_NAME      — Opik Test Suite name (required)
-    SCOUT_EXPERIMENT_NAME      — Experiment name to attach the run to
+    SCOUT_EXPERIMENT_NAME      — Experiment-name prefix; a YYYY-MM-DD-HH-MM-SS
+                                 timestamp is appended so each run is unique
+                                 (default: "scout-eval")
     SCOUT_EVAL_OPIK_PROJECT    — Opik project for eval traces
                                  (default: "scout-eval", keeps prod project clean)
 
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 
 import opik
 
@@ -42,7 +45,12 @@ logger = logging.getLogger(__name__)
 
 EVAL_OPIK_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT", "scout-eval")
 TEST_SUITE_NAME = os.environ.get("SCOUT_TEST_SUITE_NAME", "scout-triage-regression")
-EXPERIMENT_NAME = os.environ.get("SCOUT_EXPERIMENT_NAME", "scout-eval")
+EXPERIMENT_NAME_PREFIX = os.environ.get("SCOUT_EXPERIMENT_NAME", "scout-eval")
+
+
+def _experiment_name() -> str:
+    """`{prefix}-YYYY-MM-DD-HH-MM-SS` — unique per second, sortable in the UI."""
+    return f"{EXPERIMENT_NAME_PREFIX}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
 
 def make_task():
@@ -90,10 +98,12 @@ def make_task():
 def main() -> None:
     client = opik.Opik()
     suite = client.get_test_suite(TEST_SUITE_NAME)
+    experiment_name = _experiment_name()
+    logger.info("Experiment: %s", experiment_name)
     result = opik.run_tests(
         test_suite=suite,
         task=make_task(),
-        experiment_name=EXPERIMENT_NAME,
+        experiment_name=experiment_name,
     )
     pass_rate = getattr(result, "pass_rate", None)
     if pass_rate is not None:

@@ -521,6 +521,60 @@ class TestGitHubSimulator:
         assert sim.fetch_readme() == "# Repo"
 
 
+class TestGitHubSimulatorUpstream:
+    """When constructed with an upstream provider, file-side reads delegate."""
+
+    def _upstream(self) -> MagicMock:
+        up = MagicMock()
+        up.get_file_contents.return_value = "real-file-body"
+        up.list_directory.return_value = ["src/", "README.md"]
+        up.fetch_readme.return_value = "# real readme"
+        return up
+
+    def test_get_file_contents_delegates(self):
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up)
+        assert sim.get_file_contents("any/path.py") == "real-file-body"
+        up.get_file_contents.assert_called_once_with("any/path.py")
+
+    def test_list_directory_delegates(self):
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up)
+        assert sim.list_directory("src") == ["src/", "README.md"]
+        up.list_directory.assert_called_once_with("src")
+
+    def test_fetch_readme_delegates(self):
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up)
+        assert sim.fetch_readme() == "# real readme"
+        up.fetch_readme.assert_called_once_with()
+
+    def test_upstream_shadows_local_files(self):
+        # When upstream is set, local files (if any) are ignored — delegation
+        # is total, not a fallback. Scenarios.py prevents mixing, but the
+        # simulator's own behavior should be unambiguous.
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up).add_file("local.py", "local-body")
+        assert sim.get_file_contents("local.py") == "real-file-body"
+
+    def test_issue_reads_remain_simulated(self):
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up).add_issue(1, title="t", body="b")
+        # Upstream is never consulted for issues.
+        assert sim.get_issue_data(1)["title"] == "t"
+        up.get_issue_data.assert_not_called()
+
+    def test_writes_remain_simulated(self):
+        up = self._upstream()
+        sim = GitHubSimulator(upstream=up).add_issue(1, title="t", body="b")
+        sim.apply_label(1, "bug")
+        sim.post_comment(1, "hi")
+        # Mutations land on the simulator; upstream is untouched.
+        assert "bug" in sim.issue(1)["labels"]
+        up.apply_label.assert_not_called()
+        up.post_comment.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Scenario builders
 # ---------------------------------------------------------------------------
@@ -550,7 +604,12 @@ class TestScenarioBuilders:
             build("does-not-exist", {})
 
     def test_search_rate_limited_drops_after_two_calls(self):
-        spec = {"issues": [{"number": 1, "title": "hang", "body": "deadlock"}]}
+        # "files": {} keeps the spec in simulated mode; we're only exercising
+        # search behavior here, not file reads.
+        spec = {
+            "files": {},
+            "issues": [{"number": 1, "title": "hang", "body": "deadlock"}],
+        }
         sim = build("search-rate-limited", spec)
         # First two calls hit the underlying default search
         assert sim.search_issues("hang", 10) != []
@@ -561,6 +620,60 @@ class TestScenarioBuilders:
 
     def test_default_builder_registered(self):
         assert "default" in SCENARIO_BUILDERS
+
+    def test_real_mode_builds_upstream_when_files_absent(self, monkeypatch):
+        # No "files" key → real-GitHub mode. _default constructs a
+        # GitHubProvider with the spec's owner/name and the env token,
+        # and passes it to the simulator as upstream.
+        captured: dict = {}
+        fake_upstream = MagicMock()
+
+        def fake_provider_ctor(token, owner, name):
+            captured["args"] = (token, owner, name)
+            return fake_upstream
+
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
+        monkeypatch.setattr("providers.scenarios.GitHubProvider", fake_provider_ctor)
+
+        spec = {"owner": "acme", "name": "widgets", "issues": [
+            {"number": 1, "title": "t", "body": "b"},
+        ]}
+        sim = build("default", spec)
+
+        assert captured["args"] == ("ghp_real_token", "acme", "widgets")
+        # File-side reads now hit the upstream mock.
+        fake_upstream.fetch_readme.return_value = "real readme"
+        assert sim.fetch_readme() == "real readme"
+        # Issues stayed simulated.
+        assert sim.get_issue_data(1)["title"] == "t"
+
+    def test_real_mode_raises_when_token_missing(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        with pytest.raises(ValueError, match="GITHUB_TOKEN"):
+            build("default", {"owner": "acme", "name": "widgets"})
+
+    def test_real_mode_raises_when_token_is_unused_sentinel(self, monkeypatch):
+        # GITHUB_TOKEN=unused is the eval-time placeholder; real-mode scenarios
+        # need an actual token.
+        monkeypatch.setenv("GITHUB_TOKEN", "unused")
+        with pytest.raises(ValueError, match="GITHUB_TOKEN"):
+            build("default", {"owner": "acme", "name": "widgets"})
+
+    def test_real_mode_rejects_readme_key(self, monkeypatch):
+        # In real mode the README comes from GitHub — a stray "readme" key
+        # would be silently shadowed, so we reject it loudly.
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
+        monkeypatch.setattr("providers.scenarios.GitHubProvider", MagicMock())
+        with pytest.raises(ValueError, match="readme"):
+            build("default", {"owner": "acme", "name": "w", "readme": "x"})
+
+    def test_simulated_mode_does_not_build_upstream(self, monkeypatch):
+        # Even if GITHUB_TOKEN is set, presence of "files" keeps it offline.
+        ctor = MagicMock()
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
+        monkeypatch.setattr("providers.scenarios.GitHubProvider", ctor)
+        build("default", {"files": {"a.py": "x"}, "issues": []})
+        ctor.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

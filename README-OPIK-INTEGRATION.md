@@ -72,6 +72,45 @@ Four properties make this more than a dict:
 3. **Behavior is swappable per scenario.** `sim.set_search_handler(fn)` overrides the default matcher with a callable of `(query, max_results, issues) -> list[dict]`. Use for flaky search, pagination quirks, results-after-N-calls — anything you can express in Python.
 4. **Side effects are recorded.** Every mutating call is appended to `sim.calls` as a tuple. The eval driver surfaces a filtered view of this so LLM judges can grade "did Scout apply the label?" or "what search queries did it issue?".
 
+## Two modes: simulated vs. real-GitHub code
+
+The `default` scenario builder picks its mode from a single signal — whether `spec["files"]` is present.
+
+| Mode | Trigger | Code reads (`list_directory`, `get_file_contents`, `fetch_readme`) | Issues, search, writes |
+|---|---|---|---|
+| Simulated | `"files"` key present (may be empty `{}`) | Served from `spec["files"]` and `spec["readme"]` | Simulated |
+| Real-GitHub | `"files"` key absent | Delegated to `GitHubProvider` against `spec["owner"]/spec["name"]` | Simulated |
+
+**Use simulated mode when** the scenario needs adversarially constructed code (a buggy file with a specific shape), or when you want the regression to be hermetic.
+
+**Use real-GitHub mode when** the scenario only cares about issue triage behavior against your actual repo's code — you don't want to embed kilobytes of source in the spec, and live code is acceptable.
+
+Constraints in real-GitHub mode:
+- `GITHUB_TOKEN` must be set to a real token (the eval-time `unused` placeholder is rejected).
+- `owner`/`name` must name a reachable repo.
+- A `readme` key in the spec is rejected loudly — the README is fetched from GitHub, so a stray key would be silently shadowed.
+- Issues stay simulated. `target_issue` must appear in `spec["issues"]`; the simulator never reads issues from real GitHub. This keeps regression results deterministic even when real-repo state drifts.
+- Writes stay simulated. `apply_label` and `post_comment` mutate the simulator, never the real repo.
+
+Real-GitHub mode hits the network on every read, so a flaky GitHub API or rate-limit cap will surface as scenario failures. Snapshot/replay caching is a possible future addition.
+
+Example real-GitHub spec:
+```json
+{
+  "scenario": "default",
+  "spec": {
+    "owner": "comet-ml",
+    "name": "opik",
+    "issues": [
+      {"number": 999, "title": "Trainer hangs on multi-gpu",
+       "body": "fit() deadlocks on the all-reduce step",
+       "author": "u1", "state": "open", "labels": []}
+    ]
+  },
+  "target_issue": 999
+}
+```
+
 ## Scenarios — bridging JSON to the simulator
 
 Opik dataset rows are JSON; simulator behavior is Python. `providers/scenarios.py` reconciles them with a small registry:
@@ -87,7 +126,11 @@ def register(name: str):
 
 @register("default")
 def _default(spec: dict) -> GitHubSimulator:
-    sim = GitHubSimulator(spec.get("owner", "sim"), spec.get("name", "repo"))
+    upstream = None
+    if "files" not in spec:                      # real-GitHub mode
+        # ...validate GITHUB_TOKEN, reject stray 'readme'...
+        upstream = GitHubProvider(token, owner, name)
+    sim = GitHubSimulator(owner, name, upstream=upstream)
     if "readme" in spec:
         sim.set_readme(spec["readme"])
     for path, content in spec.get("files", {}).items():
@@ -236,7 +279,7 @@ ANTHROPIC_API_KEY=... OPIK_API_KEY=... OPIK_WORKSPACE=... \
   python scout_eval.py
 ```
 
-`GITHUB_TOKEN` must be set because `scout.py` validates it at import time, but the simulator never uses it — `unused` is fine. `SCOUT_EXPERIMENT_NAME` becomes the Opik Experiment name; bump it for each iteration so you can compare runs in the Opik UI.
+`GITHUB_TOKEN` must be set because `scout.py` validates it at import time. For all-simulated suites the value is unused — `unused` is fine. **For suites that include real-GitHub-mode scenarios** (specs with no `files` key), it must be a real token with read access to the target repo. `SCOUT_EXPERIMENT_NAME` is treated as a *prefix*: each run gets `{prefix}-YYYY-MM-DD-HH-MM-SS` appended, so re-running without changing the env var produces a fresh, chronologically sortable experiment in the Opik UI.
 
 ## Adding a scenario
 

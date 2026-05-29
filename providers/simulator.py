@@ -4,19 +4,33 @@ Behaves like the real API at the seams the agent touches: mutations from
 apply_label/post_comment are visible to subsequent reads. Use the fluent
 builder methods (add_issue, add_file, set_readme, set_search_handler) to
 populate state, then hand the instance to the agent like any provider.
+
+Optionally accepts an `upstream` RepositoryProvider. When set, file-side
+reads (get_file_contents, list_directory, fetch_readme) delegate to it —
+issues, search, and writes stay simulated. Scenarios use this to test
+Scout against real repo code without embedding it in the spec.
 """
 from __future__ import annotations
 
 from typing import Callable
 
+from .base import RepositoryProvider
+
 
 class GitHubSimulator:
-    def __init__(self, owner: str = "sim", name: str = "repo"):
+    def __init__(
+        self,
+        owner: str = "sim",
+        name: str = "repo",
+        *,
+        upstream: RepositoryProvider | None = None,
+    ):
         self._owner = owner
         self._name = name
         self._issues: dict[int, dict] = {}
         self._files: dict[str, str] = {}
         self._readme: str | None = None
+        self._upstream = upstream
         self._search_fn: Callable[[str, int, dict], list[dict]] = self._default_search
         self.calls: list[tuple] = []  # side-effect log for assertions
 
@@ -86,6 +100,8 @@ class GitHubSimulator:
         return self._search_fn(query, max_results, self._issues)[:max_results]
 
     def list_directory(self, path: str = "") -> list[str]:
+        if self._upstream is not None:
+            return self._upstream.list_directory(path)
         prefix = f"{path}/" if path else ""
         seen = set()
         for p in self._files:
@@ -97,6 +113,8 @@ class GitHubSimulator:
         return sorted(seen, key=lambda s: (not s.endswith("/"), s))
 
     def get_file_contents(self, path: str) -> str:
+        if self._upstream is not None:
+            return self._upstream.get_file_contents(path)
         if path not in self._files:
             return "Error: Not Found"
         text = self._files[path]
@@ -105,6 +123,8 @@ class GitHubSimulator:
         return text
 
     def fetch_readme(self) -> str | None:
+        if self._upstream is not None:
+            return self._upstream.fetch_readme()
         return self._readme
 
     def add_reaction(self, issue_number: int, reaction: str) -> None:

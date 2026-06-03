@@ -116,6 +116,14 @@ def _get_opik_project_id() -> str | None:
     return None
 
 
+def _feedback_marker(trace_id: str) -> str:
+    """Hidden HTML marker stamped into Scout comments so the feedback sync job
+    (scout_feedback.py) can map a comment's 👍/👎 reactions back to its Opik trace.
+    Invisible in rendered GitHub markdown. Keep the format in sync with
+    scout_feedback.MARKER_RE."""
+    return f"<!-- scout-feedback trace_id={trace_id} -->"
+
+
 def _build_opik_url(trace_id: str, project_id: str) -> str:
     return (
         f"https://www.comet.com/opik/{OPIK_WORKSPACE}/projects/{project_id}/logs"
@@ -352,6 +360,10 @@ When investigating source code:
 - After identifying the relevant source, briefly check whether test coverage exists for the affected code (look in tests/ or similar) and note any gaps in your Code Investigation section.
 
 Be direct and technical. Link to related issues by number (e.g. #42). Do not be condescending.
+
+Finally, close every comment with this exact line, on its own line, as the last thing in your response:
+
+_Was this helpful? React to this comment with 👍 or 👎 to rate my response._
 """
 
 
@@ -564,6 +576,8 @@ def main() -> None:
                 opik_url = _build_opik_url(opik_trace_id, project_id)
                 comment_text += f"\n\n---\n*[View Scout trace in Opik]({opik_url})*"
                 logger.info("Opik trace: %s", opik_url)
+            # Stamp the trace id so reaction-based feedback can be synced to Opik later.
+            comment_text += f"\n\n{_feedback_marker(opik_trace_id)}"
         issue.create_comment(comment_text)
         logger.info("Comment posted to issue #%d", ISSUE_NUMBER)
     except Exception as e:

@@ -7,7 +7,7 @@ Scout is a GitHub Action that triages new issues using Anthropic. When an issue 
 3. Posts a structured comment with a solution, code investigation, and next steps
 4. Escalates complex design issues by applying a configurable label
 
-Activity is traced to [Opik](https://opik.com) for observability.
+Activity is traced to [Opik](https://opik.com) for observability. Viewers can rate each response with a 👍/👎 reaction, which is synced back to Opik as human feedback — see [Response feedback](#response-feedback).
 
 ## Setup
 
@@ -93,6 +93,7 @@ The GitHub App must have these permissions:
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
 | `OPIK_API_KEY` | no | Opik API key for tracing |
 | `OPIK_WORKSPACE` | no | Opik workspace name |
+| `SCOUT_FEEDBACK_SINCE_DAYS` | no | Feedback sync only: how many days back to scan issues for 👍/👎 reactions (default: `7`) |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
 | `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
@@ -198,6 +199,19 @@ You can store Scout's system prompt in [Opik](https://www.comet.com/opik) and re
 **Precedence:** Opik > `SCOUT_SYSTEM_PROMPT` > `SCOUT_PROMPT_FILE` > built-in default. If `SCOUT_OPIK_PROMPT_NAME` is set but the fetch fails (network error, prompt not found, Opik not configured), Scout logs a warning and falls back to the next source so triage still runs.
 
 **Iterating:** edit the prompt in Opik to publish a new version. Without `SCOUT_OPIK_PROMPT_VERSION` set, the next Scout run picks it up automatically; with a pinned version, the run continues to use that version until you bump the value.
+
+## Response feedback
+
+Anyone viewing an issue can rate Scout's triage comment by adding a 👍 or 👎 **reaction** to it on GitHub. Those reactions are recorded in Opik as a human feedback score named `user_feedback` on the comment's trace:
+
+- **1.0** = all 👍, **0.0** = all 👎, otherwise the ratio `👍 / (👍 + 👎)` (e.g. 3 👍 and 1 👎 → `0.75`). Reactions other than 👍/👎 are ignored.
+- The score carries a `reason` that attributes the votes by GitHub login, e.g. `👍 2 (alice, bob) / 👎 1 (carol) from GitHub`, so you can see *who* reacted in the Opik UI alongside the trace.
+
+**How it works.** GitHub fires no event when a reaction is added, so a scheduled workflow (`.github/workflows/scout-feedback.yml`, every 30 min) polls recent issues, reads the reaction counts on Scout's comments, and upserts the score. Each Scout comment carries a hidden marker (`<!-- scout-feedback trace_id=… -->`) that maps it back to its Opik trace. The sync is idempotent — re-running simply recomputes the score from current reactions — so feedback lands in Opik within one cron interval and self-corrects as votes change.
+
+**Enabling it.** Add `.github/workflows/scout-feedback.yml` to the repo that runs Scout (it reuses the same `SCOUT_OPIK_API_KEY` secret and `OPIK_WORKSPACE` / `SCOUT_GITHUB_REPO_OWNER` / `SCOUT_GITHUB_REPO_NAME` variables). Trigger it manually from the Actions tab for an immediate sync.
+
+> **Scan window.** GitHub does not bump an issue's `updated_at` when a reaction is added, so the sync only re-checks issues with other activity within `SCOUT_FEEDBACK_SINCE_DAYS` (default 7). Reactions on otherwise-quiet older issues may be missed — run the workflow manually with a larger `since_days` to backfill. Because the upsert is idempotent, re-syncing is always safe.
 
 ## Testing
 

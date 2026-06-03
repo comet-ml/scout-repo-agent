@@ -152,6 +152,10 @@ def main() -> None:
                 "name": FEEDBACK_SCORE_NAME,
                 "value": value,
                 "reason": reason,
+                # Scope to the project where the trace lives. This runs as a
+                # standalone process (no @track / project_context), so without
+                # this the score would land in the client's default project.
+                "project_name": project_name,
             }])
             written += 1
             logger.info(

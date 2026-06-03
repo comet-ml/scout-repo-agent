@@ -1,5 +1,6 @@
 """Unit tests for scout_feedback.py."""
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import scout
 import scout_feedback
@@ -70,6 +71,44 @@ class TestFormatReason:
     def test_empty_side_shown_as_dash(self):
         reason = scout_feedback.format_reason(["alice"], [])
         assert reason == "👍 1 (alice) / 👎 0 (—) from GitHub"
+
+
+# ---------------------------------------------------------------------------
+# main — the logged score must be scoped to the trace's project
+# ---------------------------------------------------------------------------
+
+class TestMainScoresProjectScoped:
+    def test_score_includes_project_name(self, monkeypatch):
+        monkeypatch.setenv("SCOUT_GITHUB_REPO_OWNER", "acme")
+        monkeypatch.setenv("SCOUT_GITHUB_REPO_NAME", "widgets")
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        monkeypatch.setenv("OPIK_API_KEY", "key")
+        monkeypatch.setenv("OPIK_WORKSPACE", "ws")
+
+        comment = SimpleNamespace(
+            body="triage\n\n<!-- scout-feedback trace_id=0123abcd-4567-89ef -->",
+            get_reactions=lambda: [_reaction("+1", "alice"), _reaction("+1", "bob"), _reaction("-1", "carol")],
+        )
+        issue = SimpleNamespace(number=5, get_comments=lambda: [comment])
+        repo = MagicMock()
+        repo.get_issues.return_value = [issue]
+        gh = MagicMock()
+        gh.get_repo.return_value = repo
+        opik_client = MagicMock()
+
+        with patch("scout_feedback.Github", return_value=gh), \
+             patch("scout_feedback.opik.Opik", return_value=opik_client):
+            scout_feedback.main()
+
+        opik_client.log_traces_feedback_scores.assert_called_once()
+        (scores,), _ = opik_client.log_traces_feedback_scores.call_args
+        score = scores[0]
+        # Without project_name the score would land in the client's default project,
+        # not where the trace lives — see scout_feedback.main.
+        assert score["project_name"] == "scout:acme/widgets"
+        assert score["id"] == "0123abcd-4567-89ef"
+        assert score["name"] == scout_feedback.FEEDBACK_SCORE_NAME
+        assert score["value"] == 2 / 3
 
 
 # ---------------------------------------------------------------------------

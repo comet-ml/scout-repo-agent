@@ -38,10 +38,15 @@ GITHUB_TOKEN = _require("GITHUB_TOKEN")
 SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
 SCOUT_SYSTEM_PROMPT_OVERRIDE = os.environ.get("SCOUT_SYSTEM_PROMPT", "").strip()
 SCOUT_PROMPT_FILE = os.environ.get("SCOUT_PROMPT_FILE", "").strip()
-SCOUT_OPIK_PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "").strip()
+# Scout always sources its system prompt from Opik. SCOUT_OPIK_PROMPT_NAME names
+# the prompt within the project; when unset it defaults to a standard name and is
+# auto-created from the built-in base prompt on first run (see _load_system_prompt).
+DEFAULT_OPIK_PROMPT_NAME = "scout-system-prompt"
+SCOUT_OPIK_PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "").strip() or DEFAULT_OPIK_PROMPT_NAME
 SCOUT_OPIK_PROMPT_VERSION = os.environ.get("SCOUT_OPIK_PROMPT_VERSION", "").strip()
-OPIK_API_KEY = os.environ.get("OPIK_API_KEY", "")
-OPIK_WORKSPACE = os.environ.get("OPIK_WORKSPACE", "")
+# Opik is a hard requirement: Scout sources its prompt from Opik and traces there.
+OPIK_API_KEY = _require("OPIK_API_KEY")
+OPIK_WORKSPACE = _require("OPIK_WORKSPACE")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = int(os.environ.get("SCOUT_MAX_TOKENS", "8096"))
 MAX_ITERATIONS = 15
@@ -83,18 +88,18 @@ ISSUE_NUMBER = _get_issue_number()
 # Opik setup
 # ---------------------------------------------------------------------------
 
-_opik_enabled = False
-if OPIK_API_KEY and OPIK_WORKSPACE:
-    try:
-        opik.configure(
-            api_key=OPIK_API_KEY,
-            workspace=OPIK_WORKSPACE,
-            force=True,
-            automatic_approvals=True,
-        )
-        _opik_enabled = True
-    except Exception as e:
-        logger.warning("Opik configuration failed, tracing disabled: %s", e)
+# Opik is required; configuration failure is fatal.
+try:
+    opik.configure(
+        api_key=OPIK_API_KEY,
+        workspace=OPIK_WORKSPACE,
+        force=True,
+        automatic_approvals=True,
+    )
+except Exception as e:
+    raise RuntimeError(f"Opik configuration failed (Opik is required): {e}") from e
+
+_opik_enabled = True
 
 OPIK_PROJECT = f"scout:{REPO_OWNER}/{REPO_NAME}"
 
@@ -367,34 +372,11 @@ _Was this helpful? React to this comment with 👍 or 👎 to rate my response._
 """
 
 
-def _fetch_opik_prompt():
-    """Fetch the configured prompt from Opik. Returns the Prompt object, or None on any failure."""
-    try:
-        version = SCOUT_OPIK_PROMPT_VERSION or None
-        return opik.Opik().get_prompt(
-            name=SCOUT_OPIK_PROMPT_NAME,
-            version=version,
-            project_name=OPIK_PROJECT,
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to fetch Opik prompt %r (version=%r): %s — falling back to local sources",
-            SCOUT_OPIK_PROMPT_NAME,
-            SCOUT_OPIK_PROMPT_VERSION or "latest",
-            e,
-        )
-        return None
-
-
-def _load_system_prompt() -> str:
-    if SCOUT_OPIK_PROMPT_NAME and _opik_enabled:
-        prompt = _fetch_opik_prompt()
-        if prompt is not None:
-            # Use the Opik-stored body verbatim — no variable substitution.
-            # The prompt author is expected to write the repo name and any
-            # other repo-specific values directly into the prompt text.
-            return prompt.prompt
-
+def _base_system_prompt() -> str:
+    """The local 'seed' prompt used to bootstrap the Opik-managed prompt on first
+    run: env override > prompt file > built-in default, with repo placeholders
+    ($repo_owner / $repo_name / $escalation_tag) substituted so the text stored in
+    Opik is fully resolved — no $-variables remain to expand."""
     if SCOUT_SYSTEM_PROMPT_OVERRIDE:
         raw = SCOUT_SYSTEM_PROMPT_OVERRIDE
     elif SCOUT_PROMPT_FILE:
@@ -407,6 +389,53 @@ def _load_system_prompt() -> str:
         repo_name=REPO_NAME,
         escalation_tag=SCOUT_ESCALATION_TAG,
     )
+
+
+def _load_system_prompt() -> str:
+    """Always source the system prompt from Opik.
+
+    Fetch the prompt named SCOUT_OPIK_PROMPT_NAME from OPIK_PROJECT. If it does not
+    exist yet, create it from the local base prompt (see _base_system_prompt) so the
+    built-in default is never used directly — it only seeds the first Opik version.
+    The Opik body is used verbatim; edit it in the Opik UI to change Scout's behavior.
+    """
+    client = opik.Opik()
+    version = SCOUT_OPIK_PROMPT_VERSION or None
+    try:
+        prompt = client.get_prompt(
+            name=SCOUT_OPIK_PROMPT_NAME,
+            version=version,
+            project_name=OPIK_PROJECT,
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to fetch Opik prompt %r (version=%r): %s — using local base prompt",
+            SCOUT_OPIK_PROMPT_NAME, SCOUT_OPIK_PROMPT_VERSION or "latest", e,
+        )
+        return _base_system_prompt()
+
+    if prompt is not None:
+        return prompt.prompt
+
+    # First run for this project: seed Opik from the local base prompt.
+    base = _base_system_prompt()
+    logger.info(
+        "Opik prompt %r not found in project %r — creating it from the base prompt",
+        SCOUT_OPIK_PROMPT_NAME, OPIK_PROJECT,
+    )
+    try:
+        created = client.create_prompt(
+            name=SCOUT_OPIK_PROMPT_NAME,
+            prompt=base,
+            project_name=OPIK_PROJECT,
+        )
+        return created.prompt
+    except Exception as e:
+        logger.warning(
+            "Failed to create Opik prompt %r: %s — using local base prompt",
+            SCOUT_OPIK_PROMPT_NAME, e,
+        )
+        return base
 
 
 SYSTEM_PROMPT = _load_system_prompt()

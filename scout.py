@@ -14,6 +14,8 @@ import opik.opik_context as opik_context
 import requests as _requests
 from dotenv import load_dotenv
 from github import Github, GithubException
+from github.Issue import Issue
+from github.Repository import Repository
 from opik.integrations.anthropic import track_anthropic
 
 load_dotenv()
@@ -109,7 +111,7 @@ def _get_opik_project_id() -> str | None:
     try:
         resp = _requests.get(
             "https://www.comet.com/opik/api/v1/private/projects",
-            params={"page": 1, "size": 20, "name": OPIK_PROJECT},
+            params={"page": "1", "size": "20", "name": OPIK_PROJECT},
             headers={"authorization": OPIK_API_KEY, "Comet-Workspace": OPIK_WORKSPACE},
             timeout=10,
         )
@@ -154,8 +156,8 @@ def _track_tool(fn):
 # ---------------------------------------------------------------------------
 
 gh: Github
-repo: object
-issue: object
+repo: Repository
+issue: Issue
 
 
 # ---------------------------------------------------------------------------
@@ -530,12 +532,15 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=system,
-                tools=TOOL_DEFINITIONS,
-                messages=messages,
+                # The Anthropic SDK uses strict TypedDicts for these params; we build
+                # them as plain dicts/lists, which is correct at runtime but not
+                # statically inferrable. Ignore the SDK-strictness arg-type errors.
+                system=system,  # type: ignore[arg-type]
+                tools=TOOL_DEFINITIONS,  # type: ignore[arg-type]
+                messages=messages,  # type: ignore[arg-type]
             )
 
-            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "assistant", "content": response.content})  # type: ignore[dict-item]
 
             if response.stop_reason == "end_turn":
                 td = opik_context.get_current_trace_data()
@@ -560,7 +565,7 @@ def run_agent(issue_number: int) -> tuple[str, str | None]:
                             "tool_use_id": block.id,
                             "content": result,
                         })
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "user", "content": tool_results})  # type: ignore[dict-item]
 
             remaining = MAX_ITERATIONS - iteration - 1
             if remaining == 5:

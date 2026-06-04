@@ -36,7 +36,7 @@ from scout import (
     MAX_TOKENS,
     MODEL,
     SCOUT_ESCALATION_TAG,
-    SYSTEM_PROMPT,
+    load_system_prompt,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -56,6 +56,7 @@ def _experiment_name() -> str:
 def make_task():
     """Build the `task(item)` callable that `opik.run_tests` will invoke per item."""
     client = make_client(ANTHROPIC_API_KEY, opik_project=EVAL_OPIK_PROJECT)
+    system_prompt = load_system_prompt()
 
     def task(item: dict) -> dict:
         data = item.get("data", item)
@@ -70,7 +71,7 @@ def make_task():
             sim,
             target,
             client=client,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             escalation_tag=SCOUT_ESCALATION_TAG,
             repo_owner=sim.owner,
             repo_name=sim.name,

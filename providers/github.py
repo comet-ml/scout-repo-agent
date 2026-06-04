@@ -109,5 +109,15 @@ class GitHubProvider:
                     return f"Error creating label '{label_name}': {e2.data.get('message', str(e2))}"
             return f"Error applying label '{label_name}': {e.data.get('message', str(e))}"
 
+    def ensure_label(self, label_name: str, color: str = "e11d48") -> str:
+        """Ensure a repository label exists, creating it if missing. Returns
+        "exists" or "created". Used by setup tooling to provision the escalation
+        tag ahead of time (apply_label also creates it lazily at triage time)."""
+        for label in self._repo.get_labels():
+            if label.name == label_name:
+                return "exists"
+        self._repo.create_label(label_name, color)
+        return "created"
+
     def post_comment(self, issue_number: int, body: str) -> None:
         self._repo.get_issue(issue_number).create_comment(body)

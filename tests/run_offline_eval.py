@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Run Scout offline against an Opik dataset of triage scenarios.
+
+Each dataset item must use the simulator format:
+    {
+      "scenario": "default",          # builder name from providers/scenarios.py
+      "spec": {
+        "owner": "...", "name": "...",
+        "readme": "...",               # optional
+        "files": {"src/foo.py": "..."}, # omit for real-GitHub file access
+        "issues": [...]
+      },
+      "target_issue": 42
+    }
+
+Env vars (on top of the normal Scout config in .env):
+    SCOUT_OFFLINE_DATASET_NAME   — Opik dataset name (default: "scout-test-issues")
+    SCOUT_OFFLINE_OPIK_PROJECT   — Opik project for traces  (default: "scout-offline-eval")
+    SCOUT_EXPERIMENT_NAME        — prefix for the experiment name (default: "scout-offline-eval")
+"""
+from __future__ import annotations
+
+import logging
+import os
+import sys
+# scout.py calls _get_issue_number() at module level; give it a dummy value so
+# the import succeeds — the eval never uses ISSUE_NUMBER from scout directly.
+os.environ.setdefault("ISSUE_NUMBER", "1")
+
+# Resolve the repo root so relative imports work when run from the tests/ dir.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from datetime import datetime
+
+import opik
+from opik.evaluation.metrics import Usefulness
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from agent import make_client, run_agent  # noqa: E402
+from providers.scenarios import build  # noqa: E402
+from scout import (  # noqa: E402
+    ANTHROPIC_API_KEY,
+    MAX_TOKENS,
+    MODEL,
+    SCOUT_ESCALATION_TAG,
+    SYSTEM_PROMPT,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+DATASET_NAME = os.environ.get("SCOUT_OFFLINE_DATASET_NAME", "scout-test-issues")
+EVAL_OPIK_PROJECT = os.environ.get("SCOUT_OFFLINE_OPIK_PROJECT", "scout:comet-ml/scout-test-repo")
+EXPERIMENT_NAME_PREFIX = os.environ.get("SCOUT_EXPERIMENT_NAME", "scout-offline-eval")
+
+
+def _experiment_name() -> str:
+    return f"{EXPERIMENT_NAME_PREFIX}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+
+
+def eval_task(item: dict) -> dict:
+    data = item.get("data", item)
+    if "spec" not in data or "target_issue" not in data:
+        keys = list(data.keys())
+        raise ValueError(
+            f"Dataset item is missing 'spec' or 'target_issue'. Got keys: {keys}. "
+            "Re-seed the dataset using tests/utils/seed_offline_dataset.py — "
+            "old CSV-format rows must be removed first (delete the dataset in the Opik UI)."
+        )
+    scenario = data.get("scenario", "default")
+    spec = data["spec"]
+    target = int(data["target_issue"])
+
+    sim = build(scenario, spec)
+    logger.info("scenario=%s target=#%d", scenario, target)
+
+    client = make_client(ANTHROPIC_API_KEY, opik_project=EVAL_OPIK_PROJECT)
+    comment, _trace_id = run_agent(
+        sim,
+        target,
+        client=client,
+        system_prompt=SYSTEM_PROMPT,
+        escalation_tag=SCOUT_ESCALATION_TAG,
+        repo_owner=sim.owner,
+        repo_name=sim.name,
+        opik_project=EVAL_OPIK_PROJECT,
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+    )
+
+    final_issue = sim.issue(target)
+    applied = [c[2] for c in sim.calls if len(c) == 3 and c[0] == "apply_label"]
+    searches = [c[1] for c in sim.calls if len(c) == 2 and c[0] == "search_issues"]
+
+    return {
+        "input": {"target_issue": target, "issues": spec.get("issues", [])},
+        "output": comment,
+        "final_labels": final_issue["labels"],
+        "applied_labels": applied,
+        "search_queries": searches,
+    }
+
+
+def main() -> None:
+    opik_client = opik.Opik()
+    dataset = opik_client.get_dataset(DATASET_NAME)
+
+    experiment_name = _experiment_name()
+    logger.info("Dataset: %s  |  Experiment: %s", DATASET_NAME, experiment_name)
+
+    opik.evaluate(
+        dataset=dataset,
+        task=eval_task,
+        experiment_name=experiment_name,
+        project_name=EVAL_OPIK_PROJECT,
+        scoring_metrics=[Usefulness(model="claude-sonnet-4-6")],  # TODO: add more metrics and make model selectable via env var
+    )
+
+    logger.info("Done — view results in the Opik UI under project '%s'", EVAL_OPIK_PROJECT)
+
+
+if __name__ == "__main__":
+    main()

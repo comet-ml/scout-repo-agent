@@ -7,7 +7,7 @@ Scout is a GitHub Action that triages new issues using Anthropic. When an issue 
 3. Posts a structured comment with a solution, code investigation, and next steps
 4. Escalates complex design issues by applying a configurable label
 
-Activity is traced to [Opik](https://opik.com) for observability.
+Activity is traced to [Opik](https://opik.com) for observability. Viewers can rate each response with a 👍/👎 reaction, which is synced back to Opik as human feedback — see [Response feedback](#response-feedback).
 
 ## Setup
 
@@ -91,25 +91,30 @@ The GitHub App must have these permissions:
 | `SCOUT_GITHUB_REPO_OWNER` | yes | Repo owner login |
 | `SCOUT_GITHUB_REPO_NAME` | yes | Repo name |
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
-| `OPIK_API_KEY` | no | Opik API key for tracing |
-| `OPIK_WORKSPACE` | no | Opik workspace name |
+| `OPIK_API_KEY` | **yes** | Opik API key. Opik is required — Scout sources its system prompt from Opik and traces every run there. |
+| `OPIK_WORKSPACE` | **yes** | Opik workspace name |
+| `SCOUT_FEEDBACK_SINCE_DAYS` | no | Feedback sync only: how many days back to scan issues for 👍/👎 reactions (default: `7`) |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
 | `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |
 | `SCOUT_MAX_TOKENS` | no | Max response tokens (default: `8096`) |
 | `SCOUT_SYSTEM_PROMPT` | no | Override the system prompt inline. Supports `$repo_owner`, `$repo_name`, `$escalation_tag` placeholders. |
 | `SCOUT_PROMPT_FILE` | no | Path to a file containing the system prompt (same placeholders supported). Takes effect only when `SCOUT_SYSTEM_PROMPT` is not set. |
-| `SCOUT_OPIK_PROMPT_NAME` | no | Name of an Opik-managed prompt to use as the system prompt. Requires `OPIK_API_KEY` and `OPIK_WORKSPACE`. The Opik body is used verbatim — no variable substitution is performed, so write repo-specific values (owner/name, escalation tag) directly into the prompt text. **For the GitHub Action, set via the `opik_prompt_name` action input rather than `env:` — see the Opik example below.** |
+| `SCOUT_OPIK_PROMPT_NAME` | no | Name of the Opik-managed prompt Scout uses as its system prompt (default: `scout-system-prompt`). If no prompt by this name exists in the project, Scout auto-creates it from the built-in base prompt on first run. The Opik body is then used verbatim — no variable substitution — so edit it in the Opik UI to change behavior. **For the GitHub Action, set via the `opik_prompt_name` action input rather than `env:` — see the Opik example below.** |
 | `SCOUT_OPIK_PROMPT_VERSION` | no | Pin a specific Opik prompt version (e.g. `v3`). Defaults to the latest version. **For the GitHub Action, set via the `opik_prompt_version` action input.** |
 
 ## Customizing the system prompt
 
-Scout's system prompt can be replaced via `SCOUT_SYSTEM_PROMPT` (inline) or `SCOUT_PROMPT_FILE` (path to a file). Both support three placeholders that are substituted at runtime:
+Scout **always sources its system prompt from Opik** (Opik is required). On the first run for a project, if no prompt named `SCOUT_OPIK_PROMPT_NAME` (default `scout-system-prompt`) exists in the project, Scout creates it from a local **base prompt** and then uses the Opik copy verbatim on every run.
+
+The base prompt — used only to seed Opik that first time — is resolved from `SCOUT_SYSTEM_PROMPT` (inline) > `SCOUT_PROMPT_FILE` (path to a file) > the built-in default. These three placeholders are substituted **before** the text is stored in Opik, so the stored prompt is fully resolved (no `$`-variables remain):
 
 | Placeholder | Value |
 |---|---|
 | `$repo_owner` | Repository owner login |
 | `$repo_name` | Repository name |
 | `$escalation_tag` | Value of `SCOUT_ESCALATION_TAG` |
+
+> Once the Opik prompt exists, it is the source of truth — changing `SCOUT_SYSTEM_PROMPT` / `SCOUT_PROMPT_FILE` no longer affects an already-seeded prompt. To change Scout's behavior after bootstrap, edit the prompt in the Opik UI (see [Using an Opik-managed prompt](#using-an-opik-managed-prompt)).
 
 **Example: prompt file in the workflow**
 
@@ -168,15 +173,13 @@ For shorter prompts you can set the value directly as a GitHub Actions variable 
 
 ### Using an Opik-managed prompt
 
-You can store Scout's system prompt in [Opik](https://www.comet.com/opik) and reference it by name. This turns the prompt into a versioned artifact you can evaluate with Opik's Test Suite and improve with the Opik prompt optimizer, without having to redeploy the action.
+Scout's system prompt lives in [Opik](https://www.comet.com/opik) as a versioned artifact you can evaluate with Opik's Test Suite and improve with the Opik prompt optimizer, without redeploying the action. **This is the default and only path** — Scout bootstraps the prompt automatically (see [Customizing the system prompt](#customizing-the-system-prompt)), so you don't have to create it by hand.
 
-**Set up the prompt in Opik:**
+**Bootstrap (automatic):** the first run with no existing prompt creates `scout-system-prompt` (version `v1`) from the base prompt. Nothing to do.
 
-1. In the Opik UI, create a new prompt (e.g. named `scout-system-prompt`).
-2. Paste your prompt body. Scout uses it verbatim, so write any repo-specific values (owner, repo name, escalation tag) directly into the text rather than using template variables.
-3. Save. The first save creates version `v1`.
+**Pre-create it (optional):** to control the body up front, create a prompt in the Opik UI before the first run. Scout uses it verbatim, so write any repo-specific values (owner, repo name, escalation tag) directly into the text. Use the same name you pass as `opik_prompt_name` (default `scout-system-prompt`).
 
-**Reference it from the workflow:**
+**Reference a specific name/version from the workflow:**
 
 ```yaml
       - name: Run Scout
@@ -195,9 +198,22 @@ You can store Scout's system prompt in [Opik](https://www.comet.com/opik) and re
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
 ```
 
-**Precedence:** Opik > `SCOUT_SYSTEM_PROMPT` > `SCOUT_PROMPT_FILE` > built-in default. If `SCOUT_OPIK_PROMPT_NAME` is set but the fetch fails (network error, prompt not found, Opik not configured), Scout logs a warning and falls back to the next source so triage still runs.
+**Seed precedence (first run only):** `SCOUT_SYSTEM_PROMPT` > `SCOUT_PROMPT_FILE` > built-in default. Once the Opik prompt exists, Opik is the source of truth. If a fetch fails transiently (e.g. network error), Scout logs a warning and falls back to the local base prompt for that run so triage still completes.
 
 **Iterating:** edit the prompt in Opik to publish a new version. Without `SCOUT_OPIK_PROMPT_VERSION` set, the next Scout run picks it up automatically; with a pinned version, the run continues to use that version until you bump the value.
+
+## Response feedback
+
+Anyone viewing an issue can rate Scout's triage comment by adding a 👍 or 👎 **reaction** to it on GitHub. Those reactions are recorded in Opik as a human feedback score named `user_feedback` on the comment's trace:
+
+- **1.0** = all 👍, **0.0** = all 👎, otherwise the ratio `👍 / (👍 + 👎)` (e.g. 3 👍 and 1 👎 → `0.75`). Reactions other than 👍/👎 are ignored.
+- The score carries a `reason` that attributes the votes by GitHub login, e.g. `👍 2 (alice, bob) / 👎 1 (carol) from GitHub`, so you can see *who* reacted in the Opik UI alongside the trace.
+
+**How it works.** GitHub fires no event when a reaction is added, so a scheduled workflow (`.github/workflows/scout-feedback.yml`, every 30 min) polls recent issues, reads the reaction counts on Scout's comments, and upserts the score. Each Scout comment carries a hidden marker (`<!-- scout-feedback trace_id=… -->`) that maps it back to its Opik trace. The sync is idempotent — re-running simply recomputes the score from current reactions — so feedback lands in Opik within one cron interval and self-corrects as votes change.
+
+**Enabling it.** Add `.github/workflows/scout-feedback.yml` to the repo that runs Scout (it reuses the same `SCOUT_OPIK_API_KEY` secret and `OPIK_WORKSPACE` / `SCOUT_GITHUB_REPO_OWNER` / `SCOUT_GITHUB_REPO_NAME` variables). Trigger it manually from the Actions tab for an immediate sync.
+
+> **Scan window.** GitHub does not bump an issue's `updated_at` when a reaction is added, so the sync only re-checks issues with other activity within `SCOUT_FEEDBACK_SINCE_DAYS` (default 7). Reactions on otherwise-quiet older issues may be missed — run the workflow manually with a larger `since_days` to backfill. Because the upsert is idempotent, re-syncing is always safe.
 
 ## Testing
 

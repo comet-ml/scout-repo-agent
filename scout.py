@@ -84,7 +84,8 @@ def _get_issue_number() -> int:
 
 
 REPO_OWNER, REPO_NAME = _get_repo_owner_name()
-ISSUE_NUMBER = _get_issue_number()
+# ISSUE_NUMBER is resolved in main() rather than at import time so that setup
+# tooling (init_scout.py) can import scout's config without an issue context.
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ def _migrate_text_prompt_to_chat(client) -> str:
     return text
 
 
-def _load_system_prompt() -> str:
+def load_system_prompt() -> str:
     """Always source the system prompt from Opik as a chat prompt.
 
     Fetch the chat prompt named SCOUT_OPIK_PROMPT_NAME from OPIK_PROJECT. If a
@@ -325,31 +326,30 @@ def _load_system_prompt() -> str:
         return base
 
 
-SYSTEM_PROMPT = _load_system_prompt()
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    logger.info("Scout starting — issue #%d in %s/%s", ISSUE_NUMBER, REPO_OWNER, REPO_NAME)
+    issue_number = _get_issue_number()
+    logger.info("Scout starting — issue #%d in %s/%s", issue_number, REPO_OWNER, REPO_NAME)
 
     provider = GitHubProvider(GITHUB_TOKEN, REPO_OWNER, REPO_NAME)
-    provider.add_reaction(ISSUE_NUMBER, "eyes")
+    provider.add_reaction(issue_number, "eyes")
 
-    issue_data = provider.get_issue_data(ISSUE_NUMBER)
+    issue_data = provider.get_issue_data(issue_number)
     logger.info("Issue: %s", issue_data["title"])
 
+    system_prompt = load_system_prompt()
     opik_project = OPIK_PROJECT if _opik_enabled else None
     client = make_client(ANTHROPIC_API_KEY, opik_project=opik_project)
 
     try:
         comment_text, opik_trace_id = run_agent(
             provider,
-            ISSUE_NUMBER,
+            issue_number,
             client=client,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             escalation_tag=SCOUT_ESCALATION_TAG,
             repo_owner=REPO_OWNER,
             repo_name=REPO_NAME,
@@ -366,13 +366,13 @@ def main() -> None:
                 logger.info("Opik trace: %s", opik_url)
             # Stamp the trace id so reaction-based feedback can be synced to Opik later.
             comment_text += f"\n\n{_feedback_marker(opik_trace_id)}"
-        provider.post_comment(ISSUE_NUMBER, comment_text)
-        logger.info("Comment posted to issue #%d", ISSUE_NUMBER)
+        provider.post_comment(issue_number, comment_text)
+        logger.info("Comment posted to issue #%d", issue_number)
     except Exception as e:
         logger.error("Scout failed: %s", e, exc_info=True)
         try:
             provider.post_comment(
-                ISSUE_NUMBER,
+                issue_number,
                 "Scout encountered an error while analyzing this issue and could not complete triage.\n\n"
                 "Please review this issue manually."
             )

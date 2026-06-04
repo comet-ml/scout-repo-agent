@@ -22,6 +22,14 @@ def _github_exc(status: int, message: str = "error") -> GithubException:
     return GithubException(status, {"message": message}, None)
 
 
+def _label(name: str) -> MagicMock:
+    """A mock GitHub Label. `.name` must be set after construction because
+    MagicMock(name=...) sets the mock's repr name, not a `.name` attribute."""
+    label = MagicMock()
+    label.name = name
+    return label
+
+
 def _make_github_provider() -> GitHubProvider:
     """A GitHubProvider with a mocked PyGithub backend — no constructor I/O."""
     p = GitHubProvider.__new__(GitHubProvider)
@@ -124,7 +132,7 @@ class TestLoadSystemPrompt:
         defaults.update(overrides)
         with patch.multiple("scout", **defaults):
             with patch("scout.opik.Opik", return_value=client):
-                return scout._load_system_prompt()
+                return scout.load_system_prompt()
 
     @staticmethod
     def _chat_prompt(text):
@@ -310,6 +318,27 @@ class TestGitHubProviderApplyLabel:
         assert "Error applying label" in result
         assert "Server error" in result
         self.provider._repo.create_label.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GitHubProvider.ensure_label
+# ---------------------------------------------------------------------------
+
+class TestGitHubProviderEnsureLabel:
+    def setup_method(self):
+        self.provider = _make_github_provider()
+
+    def test_returns_exists_without_creating(self):
+        self.provider._repo.get_labels.return_value = [_label("bug"), _label("Escalated request")]
+        result = self.provider.ensure_label("Escalated request")
+        assert result == "exists"
+        self.provider._repo.create_label.assert_not_called()
+
+    def test_creates_when_missing(self):
+        self.provider._repo.get_labels.return_value = [_label("bug")]
+        result = self.provider.ensure_label("Escalated request")
+        assert result == "created"
+        self.provider._repo.create_label.assert_called_once_with("Escalated request", "e11d48")
 
 
 # ---------------------------------------------------------------------------

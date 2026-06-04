@@ -24,7 +24,7 @@ jobs:
         run: ruff check .
 
       - name: Mypy (type check)
-        run: mypy scout.py scout_feedback.py
+        run: mypy scout.py scout_feedback.py init_scout.py
 
       - name: Validate action + workflow YAML
         # actionlint (below) checks workflow files but not action.yml, so parse it here.

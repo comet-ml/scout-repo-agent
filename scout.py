@@ -15,6 +15,7 @@ from string import Template
 import opik
 import requests as _requests
 from dotenv import load_dotenv
+from opik.exceptions import PromptTemplateStructureMismatch
 
 from agent import make_client, run_agent
 from providers.github import GitHubProvider
@@ -214,48 +215,104 @@ def _base_system_prompt() -> str:
     )
 
 
-def _load_system_prompt() -> str:
-    """Always source the system prompt from Opik.
+def _system_messages(text: str) -> list[dict[str, str]]:
+    """Wrap the resolved system prompt text as a chat-prompt message list.
 
-    Fetch the prompt named SCOUT_OPIK_PROMPT_NAME from OPIK_PROJECT. If it does not
-    exist yet, create it from the local base prompt (see _base_system_prompt) so the
-    built-in default is never used directly — it only seeds the first Opik version.
-    The Opik body is used verbatim; edit it in the Opik UI to change Scout's behavior.
+    Scout stores its system prompt as a single system-role message so the rest
+    of the pipeline can keep treating the prompt as a plain string.
+    """
+    return [{"role": "system", "content": text}]
+
+
+def _text_from_chat_prompt(chat) -> str:
+    """Extract the system prompt text from an Opik ChatPrompt.
+
+    Pulls the content of the system-role message (see _system_messages). Falls
+    back to concatenating any other message content so we never return empty.
+    """
+    for message in chat.template:
+        if message.get("role") == "system":
+            return message["content"]
+    return "\n\n".join(m.get("content", "") for m in chat.template)
+
+
+def _migrate_text_prompt_to_chat(client) -> str:
+    """Migrate a legacy text prompt to a chat prompt under the same name.
+
+    Older Scout versions stored the system prompt as an Opik text prompt; Scout
+    now needs a chat prompt. Copy the text, delete the text prompt, and recreate
+    it as a chat prompt. Returns the migrated prompt text.
+    """
+    old = client.get_prompt(name=SCOUT_OPIK_PROMPT_NAME, project_name=OPIK_PROJECT)
+    text = old.prompt
+    logger.info(
+        "Migrating Opik text prompt %r to a chat prompt in project %r",
+        SCOUT_OPIK_PROMPT_NAME, OPIK_PROJECT,
+    )
+    client.rest_client.prompts.delete_prompt(id=old.id)
+    client.create_chat_prompt(
+        name=SCOUT_OPIK_PROMPT_NAME,
+        messages=_system_messages(text),
+        project_name=OPIK_PROJECT,
+    )
+    return text
+
+
+def _load_system_prompt() -> str:
+    """Always source the system prompt from Opik as a chat prompt.
+
+    Fetch the chat prompt named SCOUT_OPIK_PROMPT_NAME from OPIK_PROJECT. If a
+    legacy *text* prompt exists under that name, migrate it (copy, delete,
+    recreate as a chat prompt). If nothing exists yet, create it from the local
+    base prompt (see _base_system_prompt) so the built-in default is never used
+    directly — it only seeds the first Opik version. The Opik body is used
+    verbatim; edit it in the Opik UI to change Scout's behavior.
     """
     client = opik.Opik()
     version = SCOUT_OPIK_PROMPT_VERSION or None
     try:
-        prompt = client.get_prompt(
+        chat = client.get_chat_prompt(
             name=SCOUT_OPIK_PROMPT_NAME,
             version=version,
             project_name=OPIK_PROJECT,
         )
+    except PromptTemplateStructureMismatch:
+        # The name exists but points at a text prompt — migrate it to chat.
+        try:
+            return _migrate_text_prompt_to_chat(client)
+        except Exception as e:
+            logger.warning(
+                "Failed to migrate Opik text prompt %r to a chat prompt: %s — "
+                "using local base prompt",
+                SCOUT_OPIK_PROMPT_NAME, e,
+            )
+            return _base_system_prompt()
     except Exception as e:
         logger.warning(
-            "Failed to fetch Opik prompt %r (version=%r): %s — using local base prompt",
+            "Failed to fetch Opik chat prompt %r (version=%r): %s — using local base prompt",
             SCOUT_OPIK_PROMPT_NAME, SCOUT_OPIK_PROMPT_VERSION or "latest", e,
         )
         return _base_system_prompt()
 
-    if prompt is not None:
-        return prompt.prompt
+    if chat is not None:
+        return _text_from_chat_prompt(chat)
 
     # First run for this project: seed Opik from the local base prompt.
     base = _base_system_prompt()
     logger.info(
-        "Opik prompt %r not found in project %r — creating it from the base prompt",
+        "Opik chat prompt %r not found in project %r — creating it from the base prompt",
         SCOUT_OPIK_PROMPT_NAME, OPIK_PROJECT,
     )
     try:
-        created = client.create_prompt(
+        client.create_chat_prompt(
             name=SCOUT_OPIK_PROMPT_NAME,
-            prompt=base,
+            messages=_system_messages(base),
             project_name=OPIK_PROJECT,
         )
-        return created.prompt
+        return base
     except Exception as e:
         logger.warning(
-            "Failed to create Opik prompt %r: %s — using local base prompt",
+            "Failed to create Opik chat prompt %r: %s — using local base prompt",
             SCOUT_OPIK_PROMPT_NAME, e,
         )
         return base

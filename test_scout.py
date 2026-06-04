@@ -106,8 +106,9 @@ class TestGetIssueNumber:
 # ---------------------------------------------------------------------------
 
 class TestLoadSystemPrompt:
-    """Scout always sources its system prompt from Opik. The local base prompt
-    (env override > file > built-in default) only seeds Opik on first run."""
+    """Scout always sources its system prompt from Opik as a chat prompt. The
+    local base prompt (env override > file > built-in default) only seeds Opik
+    on first run, and a legacy text prompt is migrated to a chat prompt."""
 
     def _call(self, client, **overrides):
         defaults = dict(
@@ -126,36 +127,49 @@ class TestLoadSystemPrompt:
                 return scout._load_system_prompt()
 
     @staticmethod
-    def _client(*, get_return=None, get_side_effect=None):
-        """A mock Opik client. create_prompt echoes the text it was asked to store."""
+    def _chat_prompt(text):
+        """A mock ChatPrompt storing the prompt as a single system message."""
+        return MagicMock(template=[{"role": "system", "content": text}])
+
+    @classmethod
+    def _client(cls, *, get_return=None, get_side_effect=None):
+        """A mock Opik client. get_chat_prompt returns a ChatPrompt (or None);
+        create_chat_prompt records the messages it was asked to store."""
         c = MagicMock()
         if get_side_effect is not None:
-            c.get_prompt.side_effect = get_side_effect
+            c.get_chat_prompt.side_effect = get_side_effect
         else:
-            c.get_prompt.return_value = get_return
-        c.create_prompt.side_effect = lambda **kw: MagicMock(prompt=kw["prompt"])
+            c.get_chat_prompt.return_value = get_return
         return c
 
-    # --- existing Opik prompt is used verbatim --------------------------------
+    @staticmethod
+    def _mismatch():
+        return scout.PromptTemplateStructureMismatch(
+            "scout-system-prompt", "text", "chat",
+        )
+
+    # --- existing Opik chat prompt is used verbatim ---------------------------
 
     def test_existing_opik_prompt_used_verbatim(self):
-        # Placeholders in the stored body are passed through untouched, and no
-        # new prompt is created.
-        client = self._client(get_return=MagicMock(prompt="Triage for $repo_owner/$repo_name."))
+        # The system message content is returned untouched, and no new prompt
+        # is created.
+        client = self._client(
+            get_return=self._chat_prompt("Triage for $repo_owner/$repo_name.")
+        )
         result = self._call(client)
         assert result == "Triage for $repo_owner/$repo_name."
-        client.create_prompt.assert_not_called()
+        client.create_chat_prompt.assert_not_called()
 
     def test_get_prompt_scoped_to_project_and_version(self):
-        client = self._client(get_return=MagicMock(prompt="x"))
+        client = self._client(get_return=self._chat_prompt("x"))
         self._call(client, SCOUT_OPIK_PROMPT_VERSION="v3")
-        client.get_prompt.assert_called_once_with(
+        client.get_chat_prompt.assert_called_once_with(
             name="scout-system-prompt",
             version="v3",
             project_name="scout:test-owner/test-repo",
         )
 
-    # --- bootstrap: prompt missing -> create from local base ------------------
+    # --- bootstrap: prompt missing -> create chat prompt from local base ------
 
     def test_creates_from_default_when_missing(self):
         client = self._client(get_return=None)
@@ -163,10 +177,12 @@ class TestLoadSystemPrompt:
         # Created from the built-in default with placeholders fully resolved.
         assert "myorg/myrepo" in result
         assert "$repo_owner" not in result
-        kwargs = client.create_prompt.call_args.kwargs
+        kwargs = client.create_chat_prompt.call_args.kwargs
         assert kwargs["name"] == "scout-system-prompt"
         assert kwargs["project_name"] == "scout:test-owner/test-repo"
-        assert "myorg/myrepo" in kwargs["prompt"]
+        messages = kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert "myorg/myrepo" in messages[0]["content"]
 
     def test_default_seed_substitutes_escalation_tag(self):
         client = self._client(get_return=None)
@@ -186,7 +202,8 @@ class TestLoadSystemPrompt:
             REPO_OWNER="acme",
         )
         assert result == "Custom prompt for acme."
-        assert client.create_prompt.call_args.kwargs["prompt"] == "Custom prompt for acme."
+        messages = client.create_chat_prompt.call_args.kwargs["messages"]
+        assert messages == [{"role": "system", "content": "Custom prompt for acme."}]
 
     def test_file_seeds_creation_when_missing(self, tmp_path):
         prompt_file = tmp_path / "prompt.txt"
@@ -216,17 +233,40 @@ class TestLoadSystemPrompt:
         assert '{"key": "value"}' in result
         assert "acme" in result
 
+    # --- migration: legacy text prompt -> chat prompt -------------------------
+
+    def test_migrates_legacy_text_prompt_to_chat(self):
+        # get_chat_prompt reports a structure mismatch; the existing text prompt
+        # is copied, deleted, and recreated as a chat prompt.
+        client = self._client(get_side_effect=self._mismatch())
+        client.get_prompt.return_value = MagicMock(prompt="Legacy text body.", id="prompt-123")
+        result = self._call(client)
+        assert result == "Legacy text body."
+        client.rest_client.prompts.delete_prompt.assert_called_once_with(id="prompt-123")
+        kwargs = client.create_chat_prompt.call_args.kwargs
+        assert kwargs["name"] == "scout-system-prompt"
+        assert kwargs["project_name"] == "scout:test-owner/test-repo"
+        assert kwargs["messages"] == [{"role": "system", "content": "Legacy text body."}]
+
+    def test_migration_failure_falls_back_to_base(self):
+        client = self._client(get_side_effect=self._mismatch())
+        client.get_prompt.return_value = MagicMock(prompt="Legacy.", id="prompt-123")
+        client.rest_client.prompts.delete_prompt.side_effect = RuntimeError("boom")
+        result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
+        assert "myorg/myrepo" in result
+        client.create_chat_prompt.assert_not_called()
+
     # --- resilience: Opik errors fall back to the local base prompt -----------
 
     def test_get_prompt_failure_falls_back_to_base(self):
         client = self._client(get_side_effect=RuntimeError("network down"))
         result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result
-        client.create_prompt.assert_not_called()
+        client.create_chat_prompt.assert_not_called()
 
     def test_create_failure_falls_back_to_base(self):
         client = self._client(get_return=None)
-        client.create_prompt.side_effect = RuntimeError("boom")
+        client.create_chat_prompt.side_effect = RuntimeError("boom")
         result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result
 

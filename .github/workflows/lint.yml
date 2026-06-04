@@ -1,0 +1,49 @@
+name: Lint & Type Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Mypy (type check)
+        run: mypy scout.py scout_feedback.py
+
+      - name: Validate action + workflow YAML
+        # actionlint (below) checks workflow files but not action.yml, so parse it here.
+        run: |
+          python - <<'PY'
+          import glob
+          import yaml
+          for f in ["action.yml", *sorted(glob.glob(".github/workflows/*.yml"))]:
+              with open(f) as fh:
+                  yaml.safe_load(fh)
+              print(f"ok: {f}")
+          PY
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Actionlint
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color

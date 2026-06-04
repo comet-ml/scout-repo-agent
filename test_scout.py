@@ -237,9 +237,12 @@ class TestLoadSystemPrompt:
 
     def test_migrates_legacy_text_prompt_to_chat(self):
         # get_chat_prompt reports a structure mismatch; the existing text prompt
-        # is copied, deleted, and recreated as a chat prompt.
+        # is copied, deleted (by prompt id, not version id), and recreated as a
+        # chat prompt.
         client = self._client(get_side_effect=self._mismatch())
-        client.get_prompt.return_value = MagicMock(prompt="Legacy text body.", id="prompt-123")
+        client.rest_client.prompts.retrieve_prompt_version.return_value = MagicMock(
+            template="Legacy text body.", prompt_id="prompt-123"
+        )
         result = self._call(client)
         assert result == "Legacy text body."
         client.rest_client.prompts.delete_prompt.assert_called_once_with(id="prompt-123")
@@ -250,7 +253,9 @@ class TestLoadSystemPrompt:
 
     def test_migration_failure_falls_back_to_base(self):
         client = self._client(get_side_effect=self._mismatch())
-        client.get_prompt.return_value = MagicMock(prompt="Legacy.", id="prompt-123")
+        client.rest_client.prompts.retrieve_prompt_version.return_value = MagicMock(
+            template="Legacy.", prompt_id="prompt-123"
+        )
         client.rest_client.prompts.delete_prompt.side_effect = RuntimeError("boom")
         result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result

@@ -240,16 +240,23 @@ def _migrate_text_prompt_to_chat(client) -> str:
     """Migrate a legacy text prompt to a chat prompt under the same name.
 
     Older Scout versions stored the system prompt as an Opik text prompt; Scout
-    now needs a chat prompt. Copy the text, delete the text prompt, and recreate
-    it as a chat prompt. Returns the migrated prompt text.
+    now needs a chat prompt. The template structure is immutable, so we copy the
+    text, delete the text prompt, and recreate it as a chat prompt. Returns the
+    migrated prompt text.
     """
-    old = client.get_prompt(name=SCOUT_OPIK_PROMPT_NAME, project_name=OPIK_PROJECT)
-    text = old.prompt
-    logger.info(
-        "Migrating Opik text prompt %r to a chat prompt in project %r",
-        SCOUT_OPIK_PROMPT_NAME, OPIK_PROJECT,
+    # Fetch via the REST layer: delete_prompt() deletes by *prompt* id, but the
+    # high-level Prompt object's .id is the *version* id. retrieve_prompt_version
+    # gives us both the template text and the prompt id in one call.
+    version = client.rest_client.prompts.retrieve_prompt_version(
+        name=SCOUT_OPIK_PROMPT_NAME,
+        project_name=OPIK_PROJECT,
     )
-    client.rest_client.prompts.delete_prompt(id=old.id)
+    text = version.template
+    logger.info(
+        "Migrating Opik text prompt %r (id=%s) to a chat prompt in project %r",
+        SCOUT_OPIK_PROMPT_NAME, version.prompt_id, OPIK_PROJECT,
+    )
+    client.rest_client.prompts.delete_prompt(id=version.prompt_id)
     client.create_chat_prompt(
         name=SCOUT_OPIK_PROMPT_NAME,
         messages=_system_messages(text),

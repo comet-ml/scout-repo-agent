@@ -106,13 +106,15 @@ class TestGetIssueNumber:
 # ---------------------------------------------------------------------------
 
 class TestLoadSystemPrompt:
-    def _call(self, **overrides):
+    """Scout always sources its system prompt from Opik. The local base prompt
+    (env override > file > built-in default) only seeds Opik on first run."""
+
+    def _call(self, client, **overrides):
         defaults = dict(
             SCOUT_SYSTEM_PROMPT_OVERRIDE="",
             SCOUT_PROMPT_FILE="",
-            SCOUT_OPIK_PROMPT_NAME="",
+            SCOUT_OPIK_PROMPT_NAME="scout-system-prompt",
             SCOUT_OPIK_PROMPT_VERSION="",
-            _opik_enabled=False,
             REPO_OWNER="test-owner",
             REPO_NAME="test-repo",
             OPIK_PROJECT="scout:test-owner/test-repo",
@@ -120,145 +122,112 @@ class TestLoadSystemPrompt:
         )
         defaults.update(overrides)
         with patch.multiple("scout", **defaults):
-            return scout._load_system_prompt()
+            with patch("scout.opik.Opik", return_value=client):
+                return scout._load_system_prompt()
 
-    def test_default_substitutes_owner_and_repo(self):
-        result = self._call(REPO_OWNER="myorg", REPO_NAME="myrepo")
+    @staticmethod
+    def _client(*, get_return=None, get_side_effect=None):
+        """A mock Opik client. create_prompt echoes the text it was asked to store."""
+        c = MagicMock()
+        if get_side_effect is not None:
+            c.get_prompt.side_effect = get_side_effect
+        else:
+            c.get_prompt.return_value = get_return
+        c.create_prompt.side_effect = lambda **kw: MagicMock(prompt=kw["prompt"])
+        return c
+
+    # --- existing Opik prompt is used verbatim --------------------------------
+
+    def test_existing_opik_prompt_used_verbatim(self):
+        # Placeholders in the stored body are passed through untouched, and no
+        # new prompt is created.
+        client = self._client(get_return=MagicMock(prompt="Triage for $repo_owner/$repo_name."))
+        result = self._call(client)
+        assert result == "Triage for $repo_owner/$repo_name."
+        client.create_prompt.assert_not_called()
+
+    def test_get_prompt_scoped_to_project_and_version(self):
+        client = self._client(get_return=MagicMock(prompt="x"))
+        self._call(client, SCOUT_OPIK_PROMPT_VERSION="v3")
+        client.get_prompt.assert_called_once_with(
+            name="scout-system-prompt",
+            version="v3",
+            project_name="scout:test-owner/test-repo",
+        )
+
+    # --- bootstrap: prompt missing -> create from local base ------------------
+
+    def test_creates_from_default_when_missing(self):
+        client = self._client(get_return=None)
+        result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
+        # Created from the built-in default with placeholders fully resolved.
         assert "myorg/myrepo" in result
+        assert "$repo_owner" not in result
+        kwargs = client.create_prompt.call_args.kwargs
+        assert kwargs["name"] == "scout-system-prompt"
+        assert kwargs["project_name"] == "scout:test-owner/test-repo"
+        assert "myorg/myrepo" in kwargs["prompt"]
 
-    def test_default_substitutes_escalation_tag(self):
-        result = self._call(SCOUT_ESCALATION_TAG="needs-design")
+    def test_default_seed_substitutes_escalation_tag(self):
+        client = self._client(get_return=None)
+        result = self._call(client, SCOUT_ESCALATION_TAG="needs-design")
         assert "needs-design" in result
 
-    def test_env_override_used_when_set(self):
+    def test_default_seed_includes_rating_line(self):
+        client = self._client(get_return=None)
+        result = self._call(client)
+        assert "rate my response" in result
+
+    def test_env_override_seeds_creation_when_missing(self):
+        client = self._client(get_return=None)
         result = self._call(
+            client,
             SCOUT_SYSTEM_PROMPT_OVERRIDE="Custom prompt for $repo_owner.",
             REPO_OWNER="acme",
         )
         assert result == "Custom prompt for acme."
+        assert client.create_prompt.call_args.kwargs["prompt"] == "Custom prompt for acme."
 
-    def test_env_override_takes_precedence_over_file(self, tmp_path):
+    def test_file_seeds_creation_when_missing(self, tmp_path):
+        prompt_file = tmp_path / "prompt.txt"
+        prompt_file.write_text("You are a bot for $repo_name.")
+        client = self._client(get_return=None)
+        result = self._call(client, SCOUT_PROMPT_FILE=str(prompt_file), REPO_NAME="widgets")
+        assert result == "You are a bot for widgets."
+
+    def test_env_override_takes_precedence_over_file_as_seed(self, tmp_path):
         prompt_file = tmp_path / "prompt.txt"
         prompt_file.write_text("File prompt.")
+        client = self._client(get_return=None)
         result = self._call(
+            client,
             SCOUT_SYSTEM_PROMPT_OVERRIDE="Env prompt.",
             SCOUT_PROMPT_FILE=str(prompt_file),
         )
         assert result == "Env prompt."
 
-    def test_file_used_when_no_env_override(self, tmp_path):
-        prompt_file = tmp_path / "prompt.txt"
-        prompt_file.write_text("You are a bot for $repo_name.")
+    def test_seed_leaves_unknown_placeholders(self):
+        client = self._client(get_return=None)
         result = self._call(
-            SCOUT_PROMPT_FILE=str(prompt_file),
-            REPO_NAME="widgets",
-        )
-        assert result == "You are a bot for widgets."
-
-    def test_safe_substitute_leaves_unknown_placeholders(self):
-        result = self._call(
+            client,
             SCOUT_SYSTEM_PROMPT_OVERRIDE='Reply with {"key": "value"} for $repo_owner.',
             REPO_OWNER="acme",
         )
         assert '{"key": "value"}' in result
         assert "acme" in result
 
-    def test_opik_prompt_used_when_configured(self):
-        mock_prompt = MagicMock()
-        mock_prompt.prompt = "Verbatim Opik body for acme/widgets."
-        mock_client = MagicMock()
-        mock_client.get_prompt.return_value = mock_prompt
-        with patch("scout.opik.Opik", return_value=mock_client):
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=True,
-            )
-        assert result == "Verbatim Opik body for acme/widgets."
-        mock_client.get_prompt.assert_called_once_with(
-            name="scout-prompt",
-            version=None,
-            project_name="scout:test-owner/test-repo",
-        )
-        mock_prompt.format.assert_not_called()
+    # --- resilience: Opik errors fall back to the local base prompt -----------
 
-    def test_opik_prompt_returned_without_substitution(self):
-        # The Opik body is used verbatim — placeholders like $repo_owner are
-        # passed through to the model untouched.
-        mock_prompt = MagicMock()
-        mock_prompt.prompt = "Triage for $repo_owner/$repo_name."
-        mock_client = MagicMock()
-        mock_client.get_prompt.return_value = mock_prompt
-        with patch("scout.opik.Opik", return_value=mock_client):
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=True,
-                REPO_OWNER="acme",
-                REPO_NAME="widgets",
-            )
-        assert result == "Triage for $repo_owner/$repo_name."
-
-    def test_opik_version_forwarded_when_set(self):
-        mock_prompt = MagicMock()
-        mock_prompt.prompt = "v3 prompt"
-        mock_client = MagicMock()
-        mock_client.get_prompt.return_value = mock_prompt
-        with patch("scout.opik.Opik", return_value=mock_client):
-            self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                SCOUT_OPIK_PROMPT_VERSION="v3",
-                _opik_enabled=True,
-            )
-        mock_client.get_prompt.assert_called_once_with(
-            name="scout-prompt",
-            version="v3",
-            project_name="scout:test-owner/test-repo",
-        )
-
-    def test_opik_takes_precedence_over_env_override(self):
-        mock_prompt = MagicMock()
-        mock_prompt.prompt = "Opik wins"
-        mock_client = MagicMock()
-        mock_client.get_prompt.return_value = mock_prompt
-        with patch("scout.opik.Opik", return_value=mock_client):
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=True,
-                SCOUT_SYSTEM_PROMPT_OVERRIDE="env prompt",
-            )
-        assert result == "Opik wins"
-
-    def test_opik_fetch_failure_falls_back_to_default(self):
-        mock_client = MagicMock()
-        mock_client.get_prompt.side_effect = RuntimeError("network down")
-        with patch("scout.opik.Opik", return_value=mock_client):
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=True,
-                REPO_OWNER="myorg",
-                REPO_NAME="myrepo",
-            )
+    def test_get_prompt_failure_falls_back_to_base(self):
+        client = self._client(get_side_effect=RuntimeError("network down"))
+        result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result
+        client.create_prompt.assert_not_called()
 
-    def test_opik_fetch_failure_falls_back_to_env_override(self):
-        mock_client = MagicMock()
-        mock_client.get_prompt.return_value = None  # treated as failure
-        with patch("scout.opik.Opik", return_value=mock_client):
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=True,
-                SCOUT_SYSTEM_PROMPT_OVERRIDE="fallback env prompt",
-            )
-        assert result == "fallback env prompt"
-
-    def test_opik_branch_skipped_when_disabled(self):
-        with patch("scout.opik.Opik") as opik_ctor:
-            result = self._call(
-                SCOUT_OPIK_PROMPT_NAME="scout-prompt",
-                _opik_enabled=False,
-                REPO_OWNER="myorg",
-                REPO_NAME="myrepo",
-            )
-        opik_ctor.assert_not_called()
+    def test_create_failure_falls_back_to_base(self):
+        client = self._client(get_return=None)
+        client.create_prompt.side_effect = RuntimeError("boom")
+        result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result
 
 

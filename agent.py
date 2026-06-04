@@ -251,7 +251,7 @@ def run_agent(
                             "tool_use_id": block.id,
                             "content": result,
                         })
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "user", "content": tool_results})  # type: ignore[dict-item]
 
             remaining = max_iterations - iteration - 1
             if remaining == 5:

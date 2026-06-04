@@ -18,21 +18,26 @@ jobs:
           cache: pip
 
       - name: Install dev dependencies
-        run: pip install -r requirements-dev.txt
+        run: pip install -e ".[dev]"
 
       - name: Ruff (lint)
         run: ruff check .
 
       - name: Mypy (type check)
-        run: mypy scout.py scout_feedback.py init_scout.py
+        run: mypy src/scout
 
       - name: Validate action + workflow YAML
-        # actionlint (below) checks workflow files but not action.yml, so parse it here.
+        # actionlint (below) checks workflow files but not action.yml files, so parse them here.
         run: |
           python - <<'PY'
           import glob
           import yaml
-          for f in ["action.yml", *sorted(glob.glob(".github/workflows/*.yml"))]:
+          targets = [
+              "action.yml",
+              *sorted(glob.glob("actions/*/action.yml")),
+              *sorted(glob.glob(".github/workflows/*.yml")),
+          ]
+          for f in targets:
               with open(f) as fh:
                   yaml.safe_load(fh)
               print(f"ok: {f}")

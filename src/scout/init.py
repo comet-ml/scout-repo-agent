@@ -11,10 +11,10 @@ configuration). It:
   3. Reports the configured values and the resulting state.
 
 Usage:
-    python init_scout.py            # provision (steps 1 & 2), then report
-    python init_scout.py --check    # report only; make no changes
+    scout-init            # provision (steps 1 & 2), then report
+    scout-init --check    # report only; make no changes
 
-Configuration comes from the same environment variables as scout.py
+Configuration comes from the same environment variables as the triage module
 (SCOUT_GITHUB_REPO_OWNER/NAME, OPIK_API_KEY/WORKSPACE, GITHUB_TOKEN,
 SCOUT_OPIK_PROMPT_NAME, SCOUT_ESCALATION_TAG, ...). ISSUE_NUMBER is not needed.
 """
@@ -26,8 +26,8 @@ import sys
 import opik
 from opik.exceptions import PromptTemplateStructureMismatch
 
-import scout
-from providers.github import GitHubProvider
+from scout import triage
+from scout.providers.github import GitHubProvider
 
 
 # ---------------------------------------------------------------------------
@@ -39,21 +39,21 @@ def ensure_prompt(client: opik.Opik) -> str:
     "exists", "created", or "migrated". Never updates an existing prompt."""
     try:
         chat = client.get_chat_prompt(
-            name=scout.SCOUT_OPIK_PROMPT_NAME,
-            project_name=scout.OPIK_PROJECT,
+            name=triage.SCOUT_OPIK_PROMPT_NAME,
+            project_name=triage.OPIK_PROJECT,
         )
     except PromptTemplateStructureMismatch:
         # A legacy text prompt exists under this name — convert it to a chat prompt.
-        scout._migrate_text_prompt_to_chat(client)
+        triage._migrate_text_prompt_to_chat(client)
         return "migrated"
 
     if chat is not None:
         return "exists"
 
     client.create_chat_prompt(
-        name=scout.SCOUT_OPIK_PROMPT_NAME,
-        messages=scout._system_messages(scout._base_system_prompt()),
-        project_name=scout.OPIK_PROJECT,
+        name=triage.SCOUT_OPIK_PROMPT_NAME,
+        messages=triage._system_messages(triage._base_system_prompt()),
+        project_name=triage.OPIK_PROJECT,
     )
     return "created"
 
@@ -61,7 +61,7 @@ def ensure_prompt(client: opik.Opik) -> str:
 def ensure_escalation_label(provider: GitHubProvider) -> str:
     """Ensure the escalation label exists on the repo. Returns "exists" or
     "created"."""
-    return provider.ensure_label(scout.SCOUT_ESCALATION_TAG)
+    return provider.ensure_label(triage.SCOUT_ESCALATION_TAG)
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +78,8 @@ def _prompt_status(client: opik.Opik) -> str:
     """Human-readable description of the prompt's current state in Opik."""
     try:
         version = client.rest_client.prompts.retrieve_prompt_version(
-            name=scout.SCOUT_OPIK_PROMPT_NAME,
-            project_name=scout.OPIK_PROJECT,
+            name=triage.SCOUT_OPIK_PROMPT_NAME,
+            project_name=triage.OPIK_PROJECT,
         )
     except Exception:
         return "not found"
@@ -93,7 +93,7 @@ def _label_status(provider: GitHubProvider | None) -> str:
         return "unknown (repo not accessible)"
     try:
         for label in provider._repo.get_labels():
-            if label.name == scout.SCOUT_ESCALATION_TAG:
+            if label.name == triage.SCOUT_ESCALATION_TAG:
                 return "present"
         return "missing"
     except Exception as e:
@@ -104,25 +104,25 @@ def print_report(client: opik.Opik, provider: GitHubProvider | None, repo_error:
     def kv(label: str, value: object) -> None:
         print(f"  {label:<20}: {value}")
 
-    print(f"\n=== Scout configuration for {scout.OPIK_PROJECT} ===\n")
+    print(f"\n=== Scout configuration for {triage.OPIK_PROJECT} ===\n")
 
     print("Configuration")
-    kv("Repository", f"{scout.REPO_OWNER}/{scout.REPO_NAME}")
-    kv("Opik workspace", scout.OPIK_WORKSPACE)
-    kv("Opik project", scout.OPIK_PROJECT)
-    kv("Prompt name", scout.SCOUT_OPIK_PROMPT_NAME)
-    kv("Prompt version pin", scout.SCOUT_OPIK_PROMPT_VERSION or "latest")
-    kv("Escalation tag", scout.SCOUT_ESCALATION_TAG)
-    kv("Model", scout.MODEL)
-    kv("Max tokens", scout.MAX_TOKENS)
+    kv("Repository", f"{triage.REPO_OWNER}/{triage.REPO_NAME}")
+    kv("Opik workspace", triage.OPIK_WORKSPACE)
+    kv("Opik project", triage.OPIK_PROJECT)
+    kv("Prompt name", triage.SCOUT_OPIK_PROMPT_NAME)
+    kv("Prompt version pin", triage.SCOUT_OPIK_PROMPT_VERSION or "latest")
+    kv("Escalation tag", triage.SCOUT_ESCALATION_TAG)
+    kv("Model", triage.MODEL)
+    kv("Max tokens", triage.MAX_TOKENS)
 
     print("\nCredentials")
-    kv("ANTHROPIC_API_KEY", _mask(scout.ANTHROPIC_API_KEY))
-    kv("GITHUB_TOKEN", _mask(scout.GITHUB_TOKEN))
-    kv("OPIK_API_KEY", _mask(scout.OPIK_API_KEY))
+    kv("ANTHROPIC_API_KEY", _mask(triage.ANTHROPIC_API_KEY))
+    kv("GITHUB_TOKEN", _mask(triage.GITHUB_TOKEN))
+    kv("OPIK_API_KEY", _mask(triage.OPIK_API_KEY))
 
     print("\nStatus")
-    project_id = scout._get_opik_project_id()
+    project_id = triage._get_opik_project_id()
     kv("Opik project", f"found (id={project_id})" if project_id else "not found")
     kv("Prompt", _prompt_status(client))
     kv("GitHub repo", "accessible" if provider is not None else f"ERROR: {repo_error}")
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     provider: GitHubProvider | None = None
     repo_error: str | None = None
     try:
-        provider = GitHubProvider(scout.GITHUB_TOKEN, scout.REPO_OWNER, scout.REPO_NAME)
+        provider = GitHubProvider(triage.GITHUB_TOKEN, triage.REPO_OWNER, triage.REPO_NAME)
     except Exception as e:
         repo_error = str(e)
 

@@ -1,7 +1,7 @@
 """Agent loop: drives Claude through tool-calling using a RepositoryProvider.
 
 No module globals — everything the agent needs is passed in. Both production
-(scout.py) and the Test Suite driver (scout_eval.py) call run_agent the same
+(scout.triage) and the Test Suite driver (evals/run_eval.py) call run_agent the same
 way, just with different providers and clients.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import opik
 import opik.opik_context as opik_context
 from opik.integrations.anthropic import track_anthropic
 
-from providers.base import RepositoryProvider
+from scout.providers.base import RepositoryProvider
 
 logger = logging.getLogger(__name__)
 

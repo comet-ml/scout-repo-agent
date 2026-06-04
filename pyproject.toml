@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "scout-repo-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI agent that triages GitHub issues using Claude and logs activity to Opik"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.40.0",
@@ -11,12 +15,23 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pyyaml>=6.0",
 ]
+
+# Console scripts — each is the entry point a composite action invokes. Adding a
+# new action means: a module under src/scout, one line here, one thin action.yml.
+[project.scripts]
+scout-triage = "scout.triage:main"
+scout-feedback = "scout.feedback:main"
+scout-init = "scout.init:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 target-version = "py312"
@@ -26,3 +41,8 @@ python_version = "3.12"
 # Third-party SDKs (opik, PyGithub, requests) ship partial or no type info; don't
 # fail on their missing stubs. We still type-check our own modules.
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+# src/ holds the installable package; "." makes the top-level evals/ helpers
+# importable in tests without an install.
+pythonpath = ["src", "."]

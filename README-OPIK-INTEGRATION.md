@@ -15,18 +15,18 @@ The fix: an in-memory simulator that behaves like GitHub at the seams Scout actu
 ## Architecture
 
 ```
-scout.py                 scout_eval.py
+scout.triage             evals/run_eval.py
    │                          │
    ▼                          ▼
 GitHubProvider           GitHubSimulator      ◄── implements ──┐
    (PyGithub)            (in-memory)                            │
                                                                 │
                                                        RepositoryProvider
-                                                       (providers/base.py)
+                                                  (scout/providers/base.py)
                                                                 ▲
                                                                 │
                                                           agent.run_agent
-                                                          (agent.py)
+                                                       (scout/agent.py)
 ```
 
 `agent.run_agent` is the single agent loop. It depends only on the `RepositoryProvider` protocol — not on PyGithub, not on any module globals. Both backends satisfy the same interface; swapping them changes nothing about the loop, the prompt, the model, or the tool dispatch.
@@ -34,7 +34,7 @@ GitHubProvider           GitHubSimulator      ◄── implements ──┐
 The protocol covers everything Scout's tools (and `main()`) need from "GitHub":
 
 ```python
-# providers/base.py
+# src/scout/providers/base.py
 class RepositoryProvider(Protocol):
     # read
     def get_issue_data(self, issue_number: int) -> dict: ...
@@ -52,7 +52,7 @@ class RepositoryProvider(Protocol):
 
 ## The simulator
 
-`providers/simulator.py` defines `GitHubSimulator` — a real object with mutable state, not a passive fixture. Scenarios build it up with a fluent API; the agent reads and writes against it; assertions inspect both the output text and the resulting state.
+`src/scout/providers/simulator.py` defines `GitHubSimulator` — a real object with mutable state, not a passive fixture. Scenarios build it up with a fluent API; the agent reads and writes against it; assertions inspect both the output text and the resulting state.
 
 ```python
 sim = (
@@ -113,7 +113,7 @@ Example real-GitHub spec:
 
 ## Scenarios — bridging JSON to the simulator
 
-Opik dataset rows are JSON; simulator behavior is Python. `providers/scenarios.py` reconciles them with a small registry:
+Opik dataset rows are JSON; simulator behavior is Python. `src/scout/providers/scenarios.py` reconciles them with a small registry:
 
 ```python
 SCENARIO_BUILDERS: dict[str, Callable[[dict], GitHubSimulator]] = {}
@@ -203,7 +203,7 @@ See `evals/starter_scenarios.py` for five worked examples covering duplicate cit
 
 ## How the eval driver works
 
-`scout_eval.py` is the bridge between Opik's `run_tests` and the agent loop:
+`evals/run_eval.py` is the bridge between Opik's `run_tests` and the agent loop:
 
 ```python
 def task(item: dict) -> dict:
@@ -251,8 +251,8 @@ Assertions can reference any of these. Examples:
 
 Both providers route traces through Opik identically — tracing lives at the agent/tool/LLM layer, not the provider layer. What differs is the project name:
 
-- Production runs (`scout.py` → `GitHubProvider`) trace to `scout:<owner>/<repo>`.
-- Eval runs (`scout_eval.py` → `GitHubSimulator`) trace to `scout-eval` (override with `SCOUT_EVAL_OPIK_PROJECT`).
+- Production runs (`scout.triage` → `GitHubProvider`) trace to `scout:<owner>/<repo>`.
+- Eval runs (`evals/run_eval.py` → `GitHubSimulator`) trace to `scout-eval` (override with `SCOUT_EVAL_OPIK_PROJECT`).
 
 Different projects keep prod triage and eval experiments visually separate in the Opik UI. Eval runs are noisy — you may run a 5-item suite many times while iterating on the prompt — and you don't want that drowning out real triage traces.
 
@@ -276,34 +276,34 @@ ANTHROPIC_API_KEY=... OPIK_API_KEY=... OPIK_WORKSPACE=... \
   GITHUB_TOKEN=unused \
   SCOUT_GITHUB_REPO_OWNER=x SCOUT_GITHUB_REPO_NAME=y \
   SCOUT_EXPERIMENT_NAME=baseline-v1 \
-  python scout_eval.py
+  python -m evals.run_eval
 ```
 
-`GITHUB_TOKEN` must be set because `scout.py` validates it at import time. For all-simulated suites the value is unused — `unused` is fine. **For suites that include real-GitHub-mode scenarios** (specs with no `files` key), it must be a real token with read access to the target repo. `SCOUT_EXPERIMENT_NAME` is treated as a *prefix*: each run gets `{prefix}-YYYY-MM-DD-HH-MM-SS` appended, so re-running without changing the env var produces a fresh, chronologically sortable experiment in the Opik UI.
+`GITHUB_TOKEN` must be set because the triage module validates it at import time. For all-simulated suites the value is unused — `unused` is fine. **For suites that include real-GitHub-mode scenarios** (specs with no `files` key), it must be a real token with read access to the target repo. `SCOUT_EXPERIMENT_NAME` is treated as a *prefix*: each run gets `{prefix}-YYYY-MM-DD-HH-MM-SS` appended, so re-running without changing the env var produces a fresh, chronologically sortable experiment in the Opik UI.
 
 ## Adding a scenario
 
 1. **Open `evals/starter_scenarios.py`** and append a new item to `STARTER_SCENARIOS` following the shape above.
 2. **Write 3–6 specific assertions** that a judge can answer yes/no clearly. Reference the surfaced output keys (`output`, `final_labels`, `applied_labels`, `search_queries`) when behavior matters more than text.
-3. **If your scenario needs programmable behavior** (flaky tools, multi-call state changes), register a new builder with `@register("your-name")` in `providers/scenarios.py` and reference it via `"scenario": "your-name"`. The base `_default` builder is composable — call it inside your builder and then mutate the result.
-4. **Run `pytest test_scout.py -k Starter`** — three parametrized validation tests will check your scenario is structurally valid before you push.
+3. **If your scenario needs programmable behavior** (flaky tools, multi-call state changes), register a new builder with `@register("your-name")` in `src/scout/providers/scenarios.py` and reference it via `"scenario": "your-name"`. The base `_default` builder is composable — call it inside your builder and then mutate the result.
+4. **Run `pytest tests/test_triage.py -k Starter`** — three parametrized validation tests will check your scenario is structurally valid before you push.
 5. **Re-seed and re-run:**
 
    ```bash
    python -m evals.seed_test_suite
-   python scout_eval.py
+   python -m evals.run_eval
    ```
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `providers/base.py` | `RepositoryProvider` protocol |
-| `providers/github.py` | Production backend (PyGithub) |
-| `providers/simulator.py` | In-memory simulator with fluent builders |
-| `providers/scenarios.py` | Scenario builder registry + default/search-rate-limited builders |
-| `agent.py` | Agent loop, tool definitions, `make_tools`, `make_client` |
-| `scout.py` | Production entry point (env parsing, prompt loading, `main()`) |
-| `scout_eval.py` | Opik Test Suite driver |
+| `src/scout/providers/base.py` | `RepositoryProvider` protocol |
+| `src/scout/providers/github.py` | Production backend (PyGithub) |
+| `src/scout/providers/simulator.py` | In-memory simulator with fluent builders |
+| `src/scout/providers/scenarios.py` | Scenario builder registry + default/search-rate-limited builders |
+| `src/scout/agent.py` | Agent loop, tool definitions, `make_tools`, `make_client` |
+| `src/scout/triage.py` | Production entry point (env parsing, prompt loading, `main()`) |
+| `evals/run_eval.py` | Opik Test Suite driver |
 | `evals/starter_scenarios.py` | Five worked starter scenarios |
 | `evals/seed_test_suite.py` | Idempotent suite seeder |

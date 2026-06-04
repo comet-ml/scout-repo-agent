@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Packaging artifacts (pip install -e . / python -m build)
+build/
+dist/
+*.egg-info/

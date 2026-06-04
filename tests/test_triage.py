@@ -1,4 +1,4 @@
-"""Unit tests for scout.py, agent.py, and providers/."""
+"""Unit tests for scout.triage, scout.agent, and scout.providers."""
 import json
 import os
 from unittest.mock import MagicMock, patch
@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from github import GithubException
 
-import agent
-import scout
 from evals.starter_scenarios import STARTER_SCENARIOS
-from providers.github import GitHubProvider
-from providers.scenarios import SCENARIO_BUILDERS, build
-from providers.simulator import GitHubSimulator
+from scout import agent
+from scout import triage as scout
+from scout.providers.github import GitHubProvider
+from scout.providers.scenarios import SCENARIO_BUILDERS, build
+from scout.providers.simulator import GitHubSimulator
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +130,8 @@ class TestLoadSystemPrompt:
             SCOUT_ESCALATION_TAG="Escalated request",
         )
         defaults.update(overrides)
-        with patch.multiple("scout", **defaults):
-            with patch("scout.opik.Opik", return_value=client):
+        with patch.multiple("scout.triage", **defaults):
+            with patch("scout.triage.opik.Opik", return_value=client):
                 return scout.load_system_prompt()
 
     @staticmethod
@@ -676,7 +676,7 @@ class TestScenarioBuilders:
             return fake_upstream
 
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
-        monkeypatch.setattr("providers.scenarios.GitHubProvider", fake_provider_ctor)
+        monkeypatch.setattr("scout.providers.scenarios.GitHubProvider", fake_provider_ctor)
 
         spec = {"owner": "acme", "name": "widgets", "issues": [
             {"number": 1, "title": "t", "body": "b"},
@@ -706,7 +706,7 @@ class TestScenarioBuilders:
         # In real mode the README comes from GitHub — a stray "readme" key
         # would be silently shadowed, so we reject it loudly.
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
-        monkeypatch.setattr("providers.scenarios.GitHubProvider", MagicMock())
+        monkeypatch.setattr("scout.providers.scenarios.GitHubProvider", MagicMock())
         with pytest.raises(ValueError, match="readme"):
             build("default", {"owner": "acme", "name": "w", "readme": "x"})
 
@@ -714,7 +714,7 @@ class TestScenarioBuilders:
         # Even if GITHUB_TOKEN is set, presence of "files" keeps it offline.
         ctor = MagicMock()
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_real_token")
-        monkeypatch.setattr("providers.scenarios.GitHubProvider", ctor)
+        monkeypatch.setattr("scout.providers.scenarios.GitHubProvider", ctor)
         build("default", {"files": {"a.py": "x"}, "issues": []})
         ctor.assert_not_called()
 

@@ -17,8 +17,8 @@ import requests as _requests
 from dotenv import load_dotenv
 from opik.exceptions import PromptTemplateStructureMismatch
 
-from agent import make_client, run_agent
-from providers.github import GitHubProvider
+from scout.agent import make_client, run_agent
+from scout.providers.github import GitHubProvider
 
 load_dotenv()
 
@@ -85,7 +85,7 @@ def _get_issue_number() -> int:
 
 REPO_OWNER, REPO_NAME = _get_repo_owner_name()
 # ISSUE_NUMBER is resolved in main() rather than at import time so that setup
-# tooling (init_scout.py) can import scout's config without an issue context.
+# tooling (scout.init) can import the triage module's config without an issue context.
 
 
 # ---------------------------------------------------------------------------
@@ -127,9 +127,9 @@ def _get_opik_project_id() -> str | None:
 
 def _feedback_marker(trace_id: str) -> str:
     """Hidden HTML marker stamped into Scout comments so the feedback sync job
-    (scout_feedback.py) can map a comment's 👍/👎 reactions back to its Opik trace.
+    (scout.feedback) can map a comment's 👍/👎 reactions back to its Opik trace.
     Invisible in rendered GitHub markdown. Keep the format in sync with
-    scout_feedback.MARKER_RE."""
+    scout.feedback.MARKER_RE."""
     return f"<!-- scout-feedback trace_id={trace_id} -->"
 
 

@@ -1,0 +1,36 @@
+name: Scout Feedback Sync
+description: Sync 👍/👎 reactions on Scout's issue comments to Opik as human feedback scores
+author: Comet (comet.com)
+
+inputs:
+  github_token:
+    description: GitHub token with issues:read permission
+    required: true
+  since_days:
+    description: How many days back to scan issues for reactions
+    required: false
+    default: '7'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Scout
+      shell: bash
+      # ${{ github.action_path }} is this action's directory (actions/feedback);
+      # ../.. is the repo root, where the installable package lives. Installing it
+      # pulls runtime deps and registers the scout-feedback console script.
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Sync reactions to Opik
+      shell: bash
+      run: scout-feedback
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        SCOUT_FEEDBACK_SINCE_DAYS: ${{ inputs.since_days }}
+        # OPIK_API_KEY / OPIK_WORKSPACE are read from the environment the caller
+        # sets on the `uses:` step (see README), mirroring the triage action.

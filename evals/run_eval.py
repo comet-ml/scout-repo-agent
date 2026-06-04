@@ -10,7 +10,7 @@ The task function builds a fresh simulator per item, runs the agent, and
 returns the comment text plus side-effect info so Opik's LLM-judged
 assertions can grade both the output and what Scout did.
 
-Env vars (in addition to scout.py's normal config):
+Env vars (in addition to the triage module's normal config):
     SCOUT_TEST_SUITE_NAME      — Opik Test Suite name (required)
     SCOUT_EXPERIMENT_NAME      — Experiment-name prefix; a YYYY-MM-DD-HH-MM-SS
                                  timestamp is appended so each run is unique
@@ -18,7 +18,7 @@ Env vars (in addition to scout.py's normal config):
     SCOUT_EVAL_OPIK_PROJECT    — Opik project for eval traces
                                  (default: "scout-eval", keeps prod project clean)
 
-Note: scout.py validates GITHUB_TOKEN at import time. The simulator doesn't
+Note: the triage module validates GITHUB_TOKEN at import time. The simulator doesn't
 use it, so any non-empty value (e.g. "unused") is fine for eval runs.
 """
 from __future__ import annotations
@@ -29,9 +29,9 @@ from datetime import datetime
 
 import opik
 
-from agent import make_client, run_agent
-from providers.scenarios import build
-from scout import (
+from scout.agent import make_client, run_agent
+from scout.providers.scenarios import build
+from scout.triage import (
     ANTHROPIC_API_KEY,
     MAX_TOKENS,
     MODEL,

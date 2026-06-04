@@ -1,9 +1,9 @@
-"""Unit tests for scout_feedback.py."""
+"""Unit tests for scout.feedback."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import scout
-import scout_feedback
+from scout import feedback as scout_feedback
+from scout import triage as scout
 
 
 def _reaction(content: str, login: str | None = "someone"):
@@ -96,8 +96,8 @@ class TestMainScoresProjectScoped:
         gh.get_repo.return_value = repo
         opik_client = MagicMock()
 
-        with patch("scout_feedback.Github", return_value=gh), \
-             patch("scout_feedback.opik.Opik", return_value=opik_client):
+        with patch("scout.feedback.Github", return_value=gh), \
+             patch("scout.feedback.opik.Opik", return_value=opik_client):
             scout_feedback.main()
 
         opik_client.log_traces_feedback_scores.assert_called_once()

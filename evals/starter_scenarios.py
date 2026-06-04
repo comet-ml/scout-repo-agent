@@ -1,7 +1,7 @@
 """Starter scenarios for the Scout triage Test Suite.
 
 Each item is a TestSuiteItem dict ready to hand to `TestSuite.insert(...)`. The
-`data` field is what scout_eval.py's task() consumes — `scenario` picks the
+`data` field is what evals/run_eval.py's task() consumes — `scenario` picks the
 builder, `spec` populates the GitHubSimulator, `target_issue` is the issue
 Scout triages this run.
 

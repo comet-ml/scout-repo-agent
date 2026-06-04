@@ -209,9 +209,47 @@ Anyone viewing an issue can rate Scout's triage comment by adding a 👍 or 👎
 - **1.0** = all 👍, **0.0** = all 👎, otherwise the ratio `👍 / (👍 + 👎)` (e.g. 3 👍 and 1 👎 → `0.75`). Reactions other than 👍/👎 are ignored.
 - The score carries a `reason` that attributes the votes by GitHub login, e.g. `👍 2 (alice, bob) / 👎 1 (carol) from GitHub`, so you can see *who* reacted in the Opik UI alongside the trace.
 
-**How it works.** GitHub fires no event when a reaction is added, so a scheduled workflow (`.github/workflows/scout-feedback.yml`, every 30 min) polls recent issues, reads the reaction counts on Scout's comments, and upserts the score. Each Scout comment carries a hidden marker (`<!-- scout-feedback trace_id=… -->`) that maps it back to its Opik trace. The sync is idempotent — re-running simply recomputes the score from current reactions — so feedback lands in Opik within one cron interval and self-corrects as votes change.
+**How it works.** GitHub fires no event when a reaction is added, so a scheduled workflow polls recent issues every 30 minutes, reads the reaction counts on Scout's comments, and upserts the score. Each Scout comment carries a hidden marker (`<!-- scout-feedback trace_id=… -->`) that maps it back to its Opik trace. The sync is idempotent — re-running simply recomputes the score from current reactions — so feedback lands in Opik within one cron interval and self-corrects as votes change.
 
-**Enabling it.** Add `.github/workflows/scout-feedback.yml` to the repo that runs Scout (it reuses the same `SCOUT_OPIK_API_KEY` secret and `OPIK_WORKSPACE` / `SCOUT_GITHUB_REPO_OWNER` / `SCOUT_GITHUB_REPO_NAME` variables). Trigger it manually from the Actions tab for an immediate sync.
+**Enabling it.** The feedback sync ships as a second action published from this repo, `comet-ml/scout-repo-agent/actions/feedback`, alongside the triage action. Add a scheduled workflow to the repo that runs Scout — it reuses the same `OPIK_API_KEY` secret and `OPIK_WORKSPACE` value as the triage action:
+
+```yaml
+name: Scout Feedback Sync
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # every 30 minutes
+  workflow_dispatch:
+    inputs:
+      since_days:
+        description: How many days back to scan issues for reactions
+        required: false
+        default: '7'
+        type: string
+
+concurrency:
+  group: scout-feedback-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-feedback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      issues: read
+      contents: read
+    steps:
+      - name: Sync reactions to Opik
+        uses: comet-ml/scout-repo-agent/actions/feedback@main
+        with:
+          github_token: ${{ github.token }}
+          since_days: ${{ github.event.inputs.since_days || '7' }}
+        env:
+          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+```
+
+Trigger it manually from the Actions tab for an immediate sync.
 
 > **Scan window.** GitHub does not bump an issue's `updated_at` when a reaction is added, so the sync only re-checks issues with other activity within `SCOUT_FEEDBACK_SINCE_DAYS` (default 7). Reactions on otherwise-quiet older issues may be missed — run the workflow manually with a larger `since_days` to backfill. Because the upsert is idempotent, re-syncing is always safe.
 
@@ -221,14 +259,20 @@ Use the manual trigger workflow in this repo's Actions tab (`Test Scout (Manual)
 
 ## Local development
 
+The code is an installable package under `src/scout/`. Install it (with dev extras) in editable mode:
+
 ```bash
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
 # Copy and fill in the template
 cp .env.example .env
 
-python scout.py
+# Run triage locally (console script registered by the install).
+# Equivalent to `python -m scout.triage`.
+scout-triage
 ```
+
+Run the unit tests and linters with `pytest`, `ruff check .`, and `mypy src/scout`.
 
 `.env.example`:
 ```

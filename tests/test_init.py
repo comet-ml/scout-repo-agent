@@ -1,10 +1,10 @@
-"""Unit tests for init_scout.py."""
+"""Unit tests for scout.init."""
 from unittest.mock import MagicMock
 
 from opik.exceptions import PromptTemplateStructureMismatch
 
-import init_scout
-import scout
+from scout import init as init_scout
+from scout import triage as scout
 
 
 def _mismatch() -> PromptTemplateStructureMismatch:

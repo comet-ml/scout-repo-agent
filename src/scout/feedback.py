@@ -3,7 +3,8 @@
 them in Opik as human feedback scores.
 
 GitHub emits no event when a reaction is added to a comment, so this runs on a
-schedule (see .github/workflows/scout-feedback.yml) and polls recent issues.
+schedule via the `feedback` action (actions/feedback/action.yml) and polls recent
+issues. See the "Response feedback" section of the README for the consumer workflow.
 
 The sync is idempotent: Opik upserts feedback scores by (trace_id, name), so each
 run simply recomputes the score from the current reaction counts and overwrites

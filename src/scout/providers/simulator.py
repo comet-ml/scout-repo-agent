@@ -14,7 +14,22 @@ from __future__ import annotations
 
 from typing import Callable
 
+from scout.markers import SCOUT_COMMENT_MARKER
+
 from .base import RepositoryProvider
+
+
+def _comment_role(comment: dict) -> str:
+    """Mirror GitHubProvider's role detection: a comment is an assistant turn if
+    it explicitly says so, was authored by the simulated Scout bot, or carries
+    Scout's hidden marker. Everything else is a human ``user`` turn."""
+    if comment.get("role"):
+        return comment["role"]
+    if comment.get("author") == "scout-bot":
+        return "assistant"
+    if SCOUT_COMMENT_MARKER in (comment.get("body") or ""):
+        return "assistant"
+    return "user"
 
 
 class GitHubSimulator:
@@ -54,19 +69,42 @@ class GitHubSimulator:
         body: str = "",
         state: str = "open",
         author: str = "user",
+        author_association: str = "NONE",
         labels: list[str] | None = None,
         comments: list[dict] | None = None,
     ) -> "GitHubSimulator":
+        # Comments are a flat, chronological list — GitHub issue comments are not
+        # nested/threaded (that's PR review comments / Discussions). Order carries
+        # the conversation. Each comment dict may carry an optional `association`
+        # and `role`; both are normalized at read time in get_issue_data.
         self._issues[number] = {
             "number": number,
             "title": title,
             "body": body,
             "state": state,
             "author": author,
+            "author_association": author_association,
             "labels": list(labels or []),
-            "comments": list(comments or []),
+            "comments": [dict(c) for c in (comments or [])],
             "url": f"https://github.com/{self._owner}/{self._name}/issues/{number}",
         }
+        return self
+
+    def add_comment(
+        self,
+        issue_number: int,
+        *,
+        author: str,
+        body: str,
+        association: str = "NONE",
+        role: str | None = None,
+    ) -> "GitHubSimulator":
+        """Append a comment to an existing issue. Use to build multi-party threads;
+        pass role='assistant' (or author='scout-bot') for a prior Scout reply."""
+        comment: dict = {"author": author, "body": body, "association": association}
+        if role:
+            comment["role"] = role
+        self._issues[issue_number]["comments"].append(comment)
         return self
 
     def add_file(self, path: str, content: str) -> "GitHubSimulator":
@@ -93,7 +131,22 @@ class GitHubSimulator:
 
     def get_issue_data(self, issue_number: int) -> dict:
         src = self._issues[issue_number]
-        return {**src, "labels": list(src["labels"]), "comments": [dict(c) for c in src["comments"]]}
+        # Mirror GitHubProvider.get_issue_data exactly: keep the most recent 20
+        # comments and truncate each body to 500 chars, so evals see the same
+        # data production would.
+        comments = []
+        for c in src["comments"][-20:]:
+            c = dict(c)
+            c.setdefault("association", "NONE")
+            c["role"] = _comment_role(c)
+            c["body"] = (c.get("body") or "")[:500]
+            comments.append(c)
+        return {
+            **src,
+            "author_association": src.get("author_association", "NONE"),
+            "labels": list(src["labels"]),
+            "comments": comments,
+        }
 
     def search_issues(self, query: str, max_results: int = 10) -> list[dict]:
         self.calls.append(("search_issues", query))

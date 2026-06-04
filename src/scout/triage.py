@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from opik.exceptions import PromptTemplateStructureMismatch
 
 from scout.agent import make_client, run_agent
+from scout.markers import SCOUT_COMMENT_MARKER
 from scout.providers.github import GitHubProvider
 
 load_dotenv()
@@ -53,6 +54,11 @@ OPIK_API_KEY = _require("OPIK_API_KEY")
 OPIK_WORKSPACE = _require("OPIK_WORKSPACE")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = int(os.environ.get("SCOUT_MAX_TOKENS", "8096"))
+# When true, comment-triggered runs only fire if the comment @-mentions Scout.
+# Off by default: Scout responds to every (non-bot, non-Scout) comment.
+SCOUT_COMMENT_TRIGGER_MENTION = os.environ.get(
+    "SCOUT_COMMENT_TRIGGER_MENTION", ""
+).strip().lower() in ("1", "true", "yes")
 
 
 def _get_repo_owner_name() -> tuple[str, str]:
@@ -75,12 +81,54 @@ def _get_issue_number() -> int:
     issue_env = os.environ.get("ISSUE_NUMBER", "").strip()
     if issue_env:
         return int(issue_env)
-    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
-    if event_path and os.path.isfile(event_path):
-        with open(event_path) as f:
-            event = json.load(f)
+    event = _load_event()
+    if event and "issue" in event:
         return int(event["issue"]["number"])
     raise ValueError("Set ISSUE_NUMBER or run inside a GitHub Actions issues event")
+
+
+def _load_event() -> dict | None:
+    """Parse the GitHub Actions event payload (GITHUB_EVENT_PATH), or None."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path and os.path.isfile(event_path):
+        try:
+            with open(event_path) as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Could not read GITHUB_EVENT_PATH %r: %s", event_path, e)
+    return None
+
+
+def _is_bot(user: dict) -> bool:
+    """True if a GitHub user payload is a bot account (type 'Bot' or a
+    '...[bot]' login). Used to avoid reacting to other automation."""
+    if not user:
+        return False
+    if user.get("type") == "Bot":
+        return True
+    return (user.get("login") or "").lower().endswith("[bot]")
+
+
+def _mentions_scout(body: str) -> bool:
+    return "@scout" in (body or "").lower()
+
+
+def _should_skip_comment_event(event: dict) -> str | None:
+    """For an issue_comment event, return a reason string if Scout should NOT
+    run (PR comment, Scout's own comment, a bot, or mention-gated and unmentioned),
+    or None to proceed."""
+    issue_payload = event.get("issue", {})
+    if issue_payload.get("pull_request"):
+        return "comment is on a pull request, not an issue"
+    comment = event.get("comment", {})
+    body = comment.get("body", "") or ""
+    if SCOUT_COMMENT_MARKER in body:
+        return "triggering comment is Scout's own (marker present)"
+    if _is_bot(comment.get("user", {})):
+        return "triggering comment is from a bot account"
+    if SCOUT_COMMENT_TRIGGER_MENTION and not _mentions_scout(body):
+        return "mention-gating is on and the comment does not @-mention Scout"
+    return None
 
 
 REPO_OWNER, REPO_NAME = _get_repo_owner_name()
@@ -188,6 +236,8 @@ When investigating source code:
 - Read all relevant source files in a single batched tool call rather than fetching them one at a time.
 - Focus on code files directly relevant to the reported behavior — skip data files (word lists, configs, assets) unless the issue is specifically about that data.
 - After identifying the relevant source, briefly check whether test coverage exists for the affected code (look in tests/ or similar) and note any gaps in your Code Investigation section.
+
+Conversation format: you may be triaging a thread, not just an opening post. Each message is prefixed with the speaker as [username (association)], where association is the commenter's relationship to the repo — OWNER, MEMBER, and COLLABORATOR are maintainers; CONTRIBUTOR has had a PR merged; NONE/FIRST_TIME_CONTRIBUTOR are outside contributors. Weigh maintainer input more heavily (e.g. a MEMBER steering the direction or confirming a cause), and address the most recent comment directly while accounting for everything said earlier in the thread. Your own prior replies appear as the assistant turns — build on them; do not repeat yourself.
 
 Be direct and technical. Link to related issues by number (e.g. #42). Do not be condescending.
 
@@ -332,10 +382,32 @@ def load_system_prompt() -> str:
 
 def main() -> None:
     issue_number = _get_issue_number()
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+    event = _load_event()
+
+    # Scout runs on issue open AND on new comments. On a comment trigger, decide
+    # whether to act at all (skip PRs, Scout's own comments, bots, and — when
+    # enabled — comments that don't @-mention Scout) before doing any work.
+    comment_id: int | None = None
+    if event_name == "issue_comment" and event is not None:
+        skip_reason = _should_skip_comment_event(event)
+        if skip_reason:
+            logger.info("Skipping comment-triggered run: %s", skip_reason)
+            return
+        comment_id = event.get("comment", {}).get("id")
+
     logger.info("Scout starting — issue #%d in %s/%s", issue_number, REPO_OWNER, REPO_NAME)
 
     provider = GitHubProvider(GITHUB_TOKEN, REPO_OWNER, REPO_NAME)
-    provider.add_reaction(issue_number, "eyes")
+    # React on the thing that triggered the run: the comment, or the issue itself.
+    if comment_id is not None:
+        try:
+            provider.add_comment_reaction(issue_number, int(comment_id), "eyes")
+        except Exception as e:
+            logger.warning("Could not react to comment #%s: %s", comment_id, e)
+            provider.add_reaction(issue_number, "eyes")
+    else:
+        provider.add_reaction(issue_number, "eyes")
 
     issue_data = provider.get_issue_data(issue_number)
     logger.info("Issue: %s", issue_data["title"])

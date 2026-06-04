@@ -38,9 +38,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent import make_client, run_agent
-from providers.scenarios import build
-from scout import (
+from agent import make_client, run_agent  # noqa: E402
+from providers.scenarios import build  # noqa: E402
+from scout import (  # noqa: E402
     ANTHROPIC_API_KEY,
     MAX_TOKENS,
     MODEL,

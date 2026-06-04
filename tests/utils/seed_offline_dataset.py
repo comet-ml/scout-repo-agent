@@ -63,7 +63,7 @@ def _csv_row_to_dataset_item(row: dict) -> dict:
         comments = []
 
     labels_raw = row.get("labels", "")
-    labels = [l.strip() for l in labels_raw.split(",") if l.strip()] if labels_raw else []
+    labels = [s.strip() for s in labels_raw.split(",") if s.strip()] if labels_raw else []
 
     issue_number = int(row["number"])
 

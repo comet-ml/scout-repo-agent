@@ -14,4 +14,15 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+# Third-party SDKs (opik, PyGithub, requests) ship partial or no type info; don't
+# fail on their missing stubs. We still type-check our own modules.
+ignore_missing_imports = true

@@ -25,14 +25,19 @@ jobs:
       - name: Validate secrets
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPIK_API_KEY: ${{ secrets.SCOUT_OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
         run: |
           MISSING=""
           [ -z "$ANTHROPIC_API_KEY" ] && MISSING="$MISSING ANTHROPIC_API_KEY"
+          # Opik is a hard requirement — Scout sources its prompt from Opik and traces there.
+          [ -z "$OPIK_API_KEY" ] && MISSING="$MISSING SCOUT_OPIK_API_KEY"
+          [ -z "$OPIK_WORKSPACE" ] && MISSING="$MISSING OPIK_WORKSPACE"
           if [ -n "$MISSING" ]; then
-            echo "::error::Missing required secrets:$MISSING"
+            echo "::error::Missing required config:$MISSING"
             exit 1
           fi
-          echo "All required secrets present"
+          echo "All required config present"
 
       - name: Checkout Scout
         uses: actions/checkout@v4

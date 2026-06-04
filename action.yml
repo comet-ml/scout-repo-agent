@@ -10,7 +10,7 @@ inputs:
     description: GitHub token with issues:write and contents:read permissions
     required: true
   opik_prompt_name:
-    description: Name of an Opik-managed system prompt to use instead of the built-in default. Requires OPIK_API_KEY and OPIK_WORKSPACE to be set.
+    description: Name of the Opik-managed system prompt (default 'scout-system-prompt'). Auto-created from the built-in base prompt on first run if absent. Opik (OPIK_API_KEY + OPIK_WORKSPACE) is required.
     required: false
     default: ''
   opik_prompt_version:

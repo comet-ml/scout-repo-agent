@@ -1,0 +1,64 @@
+name: Scout Feedback Sync
+
+on:
+  # GitHub emits no event for comment reactions, so poll on a schedule.
+  schedule:
+    - cron: '*/30 * * * *'  # every 30 minutes
+  # Allow manual runs (and an optional wider scan window for backfills).
+  workflow_dispatch:
+    inputs:
+      since_days:
+        description: How many days back to scan issues for reactions
+        required: false
+        default: '7'
+        type: string
+
+# Don't let overlapping syncs double up.
+concurrency:
+  group: scout-feedback-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-feedback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      issues: read
+      contents: read
+
+    steps:
+      - name: Validate secrets
+        env:
+          OPIK_API_KEY: ${{ secrets.SCOUT_OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+        run: |
+          MISSING=""
+          [ -z "$OPIK_API_KEY" ] && MISSING="$MISSING SCOUT_OPIK_API_KEY"
+          [ -z "$OPIK_WORKSPACE" ] && MISSING="$MISSING OPIK_WORKSPACE"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required config:$MISSING"
+            exit 1
+          fi
+          echo "All required config present"
+
+      - name: Checkout Scout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sync reactions to Opik
+        run: python scout_feedback.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPIK_API_KEY: ${{ secrets.SCOUT_OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ vars.OPIK_WORKSPACE }}
+          SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
+          SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
+          SCOUT_FEEDBACK_SINCE_DAYS: ${{ github.event.inputs.since_days || '7' }}

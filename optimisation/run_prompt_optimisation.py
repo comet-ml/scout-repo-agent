@@ -65,7 +65,7 @@ class ScoutAgent(OptimizableAgent):
         allow_tool_use: bool = False,
         seed: int | None = None,
     ) -> str:
-        system_prompt = list(prompts.values())[0].system or ""
+        system_prompt = next(iter(prompts.values())).system or ""
         data = dataset_item.get("data", dataset_item)
         scenario = data.get("scenario", "default")
         spec = data["spec"]
@@ -119,7 +119,7 @@ def main() -> None:
         sys.exit(f"ERROR: Opik chat prompt {PROMPT_NAME!r} not found in project {OPIK_PROJECT!r}.")
 
     system_message = _text_from_chat_prompt(chat_prompt_obj)
-    initial_prompt = ChatPrompt(system=system_message, user="{input}")
+    initial_prompt = ChatPrompt(system=system_message, user="{issue_message}")
 
     optimizer = MetaPromptOptimizer(
         model=f"anthropic/{MODEL}",

@@ -176,6 +176,79 @@ class TestCommentTriggerGating:
 
 
 # ---------------------------------------------------------------------------
+# GitHub error messaging (permission / scope failures)
+# ---------------------------------------------------------------------------
+
+class TestGitHubErrorMessaging:
+    def test_is_permission_error_true_for_403(self):
+        assert scout._is_permission_error(_github_exc(403)) is True
+
+    def test_is_permission_error_true_for_401(self):
+        assert scout._is_permission_error(_github_exc(401)) is True
+
+    def test_is_permission_error_false_for_404(self):
+        assert scout._is_permission_error(_github_exc(404)) is False
+
+    def test_is_permission_error_false_for_non_github_exception(self):
+        assert scout._is_permission_error(RuntimeError("boom")) is False
+
+    def test_explain_403_includes_actionable_permission_help(self):
+        msg = scout._explain_github_error(_github_exc(403, "Resource not accessible by integration"))
+        assert "issues: write" in msg
+        assert "contents: read" in msg
+        # The underlying GitHub detail and status are surfaced too.
+        assert "Resource not accessible by integration" in msg
+        assert "403" in msg
+
+    def test_explain_non_permission_error_omits_help(self):
+        msg = scout._explain_github_error(_github_exc(500, "Server error"))
+        assert "issues: write" not in msg
+        assert "500" in msg
+        assert "Server error" in msg
+
+
+# ---------------------------------------------------------------------------
+# main(): GitHub setup failures degrade gracefully
+# ---------------------------------------------------------------------------
+
+class TestMainGitHubFailures:
+    def test_react_best_effort_swallows_permission_error(self):
+        provider = MagicMock()
+        provider.add_reaction.side_effect = _github_exc(403)
+        # Must not raise — reacting is not essential to triage.
+        scout._react(provider, 42, None)
+
+    def test_react_falls_back_to_issue_when_comment_reaction_fails(self):
+        provider = MagicMock()
+        provider.add_comment_reaction.side_effect = _github_exc(404)
+        scout._react(provider, 42, 99)
+        provider.add_reaction.assert_called_once_with(42, "eyes")
+
+    def test_provider_construction_permission_error_exits_cleanly(self, caplog):
+        # A 403 building the provider exits non-zero with the actionable message,
+        # not an unhandled traceback.
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "", "ISSUE_NUMBER": "42"}):
+            with patch("scout.triage.GitHubProvider", side_effect=_github_exc(403, "Resource not accessible by integration")):
+                with pytest.raises(SystemExit) as exc:
+                    scout.main()
+        assert exc.value.code == 1
+        assert "issues: write" in caplog.text
+
+    def test_get_issue_data_permission_error_exits_cleanly(self, caplog):
+        # Provider builds, the best-effort reaction is attempted, then reading the
+        # issue fails with 403 → clean exit before the agent ever runs.
+        provider = MagicMock()
+        provider.get_issue_data.side_effect = _github_exc(403, "Resource not accessible by integration")
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "", "ISSUE_NUMBER": "42"}):
+            with patch("scout.triage.GitHubProvider", return_value=provider):
+                with pytest.raises(SystemExit) as exc:
+                    scout.main()
+        assert exc.value.code == 1
+        assert "issues: write" in caplog.text
+        provider.add_reaction.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # _load_system_prompt
 # ---------------------------------------------------------------------------
 

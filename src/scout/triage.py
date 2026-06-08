@@ -15,6 +15,7 @@ from string import Template
 import opik
 import requests as _requests
 from dotenv import load_dotenv
+from github import GithubException
 from opik.exceptions import PromptTemplateStructureMismatch
 
 from scout.agent import make_client, run_agent
@@ -129,6 +130,51 @@ def _should_skip_comment_event(event: dict) -> str | None:
     if SCOUT_COMMENT_TRIGGER_MENTION and not _mentions_scout(body):
         return "mention-gating is on and the comment does not @-mention Scout"
     return None
+
+
+GITHUB_PERMISSION_HELP = (
+    "Scout's GITHUB_TOKEN is missing a required permission. The workflow that runs "
+    "Scout must grant:\n"
+    "  permissions:\n"
+    "    issues: write     # comment on, label, and react to issues\n"
+    "    contents: read    # read source files during investigation\n"
+    "and pass the token via the action's `github_token` input (e.g. ${{ github.token }})."
+)
+
+
+def _is_permission_error(exc: Exception) -> bool:
+    """True for GitHub 401/403 — an authentication or permission/scope failure
+    (as opposed to a 404, rate limit, or server error)."""
+    return isinstance(exc, GithubException) and getattr(exc, "status", None) in (401, 403)
+
+
+def _explain_github_error(exc: GithubException) -> str:
+    """A human-readable, actionable message for a GitHub API failure. Permission
+    failures (401/403) append guidance on the token permissions Scout needs."""
+    detail = ""
+    if isinstance(getattr(exc, "data", None), dict):
+        detail = exc.data.get("message", "") or ""
+    status = getattr(exc, "status", "?")
+    base = f"GitHub rejected the request (HTTP {status}{': ' + detail if detail else ''})."
+    if _is_permission_error(exc):
+        return f"{base}\n{GITHUB_PERMISSION_HELP}"
+    return base
+
+
+def _react(provider: GitHubProvider, issue_number: int, comment_id: int | None) -> None:
+    """Add the 👀 acknowledgement reaction on the triggering comment (or the issue).
+    Best-effort: reacting is not essential to triage, so any failure — including a
+    missing `issues: write` permission — is logged and the run continues."""
+    if comment_id is not None:
+        try:
+            provider.add_comment_reaction(issue_number, int(comment_id), "eyes")
+            return
+        except Exception as e:
+            logger.warning("Could not react to comment #%s, trying the issue: %s", comment_id, e)
+    try:
+        provider.add_reaction(issue_number, "eyes")
+    except Exception as e:
+        logger.warning("Could not add reaction (continuing without it): %s", e)
 
 
 REPO_OWNER, REPO_NAME = _get_repo_owner_name()
@@ -398,18 +444,20 @@ def main() -> None:
 
     logger.info("Scout starting — issue #%d in %s/%s", issue_number, REPO_OWNER, REPO_NAME)
 
-    provider = GitHubProvider(GITHUB_TOKEN, REPO_OWNER, REPO_NAME)
-    # React on the thing that triggered the run: the comment, or the issue itself.
-    if comment_id is not None:
-        try:
-            provider.add_comment_reaction(issue_number, int(comment_id), "eyes")
-        except Exception as e:
-            logger.warning("Could not react to comment #%s: %s", comment_id, e)
-            provider.add_reaction(issue_number, "eyes")
-    else:
-        provider.add_reaction(issue_number, "eyes")
+    try:
+        provider = GitHubProvider(GITHUB_TOKEN, REPO_OWNER, REPO_NAME)
+    except GithubException as e:
+        logger.error("Could not access %s/%s: %s", REPO_OWNER, REPO_NAME, _explain_github_error(e))
+        sys.exit(1)
 
-    issue_data = provider.get_issue_data(issue_number)
+    # React on the thing that triggered the run (best-effort, never fatal).
+    _react(provider, issue_number, comment_id)
+
+    try:
+        issue_data = provider.get_issue_data(issue_number)
+    except GithubException as e:
+        logger.error("Could not read issue #%d: %s", issue_number, _explain_github_error(e))
+        sys.exit(1)
     logger.info("Issue: %s", issue_data["title"])
 
     system_prompt = load_system_prompt()
@@ -441,7 +489,12 @@ def main() -> None:
         provider.post_comment(issue_number, comment_text)
         logger.info("Comment posted to issue #%d", issue_number)
     except Exception as e:
-        logger.error("Scout failed: %s", e, exc_info=True)
+        # GitHub API failures (e.g. a permission error posting the comment) get a
+        # clean, actionable message; anything unexpected keeps its traceback.
+        if isinstance(e, GithubException):
+            logger.error("Scout failed: %s", _explain_github_error(e))
+        else:
+            logger.error("Scout failed: %s", e, exc_info=True)
         try:
             provider.post_comment(
                 issue_number,

@@ -108,6 +108,145 @@ class TestGetIssueNumber:
             with pytest.raises(ValueError, match="ISSUE_NUMBER"):
                 scout._get_issue_number()
 
+    def test_resolves_from_issue_comment_payload(self, tmp_path):
+        # issue_comment events carry the issue number under the same key.
+        event = {"issue": {"number": 314}, "comment": {"id": 1, "body": "hi"}}
+        event_file = tmp_path / "event.json"
+        event_file.write_text(json.dumps(event))
+        with patch.dict(os.environ, {"ISSUE_NUMBER": "", "GITHUB_EVENT_PATH": str(event_file)}, clear=True):
+            assert scout._get_issue_number() == 314
+
+
+# ---------------------------------------------------------------------------
+# Comment-trigger gating
+# ---------------------------------------------------------------------------
+
+class TestCommentTriggerGating:
+    def test_is_bot_by_type(self):
+        assert scout._is_bot({"type": "Bot", "login": "x"}) is True
+
+    def test_is_bot_by_login_suffix(self):
+        assert scout._is_bot({"type": "User", "login": "github-actions[bot]"}) is True
+
+    def test_is_bot_false_for_human(self):
+        assert scout._is_bot({"type": "User", "login": "alice"}) is False
+
+    def test_is_bot_false_for_empty(self):
+        assert scout._is_bot({}) is False
+
+    def test_mentions_scout(self):
+        assert scout._mentions_scout("hey @Scout can you help") is True
+        assert scout._mentions_scout("no mention here") is False
+
+    def _event(self, body="real question", user=None, pull_request=False):
+        issue = {"number": 1}
+        if pull_request:
+            issue["pull_request"] = {"url": "https://api.github.com/.../pulls/1"}
+        return {
+            "issue": issue,
+            "comment": {"id": 9, "body": body, "user": user or {"login": "alice", "type": "User"}},
+        }
+
+    def test_skip_pull_request_comment(self):
+        reason = scout._should_skip_comment_event(self._event(pull_request=True))
+        assert reason and "pull request" in reason
+
+    def test_skip_scouts_own_comment(self):
+        body = "my reply <!-- scout-feedback trace_id=abc -->"
+        reason = scout._should_skip_comment_event(self._event(body=body, user={"login": "scout[bot]", "type": "Bot"}))
+        assert reason and "Scout's own" in reason
+
+    def test_skip_bot_comment(self):
+        reason = scout._should_skip_comment_event(
+            self._event(user={"login": "dependabot[bot]", "type": "Bot"})
+        )
+        assert reason and "bot" in reason
+
+    def test_proceeds_on_human_comment(self):
+        assert scout._should_skip_comment_event(self._event()) is None
+
+    def test_mention_gating_skips_when_unmentioned(self):
+        with patch.object(scout, "SCOUT_COMMENT_TRIGGER_MENTION", True):
+            reason = scout._should_skip_comment_event(self._event(body="no mention here"))
+        assert reason and "mention" in reason
+
+    def test_mention_gating_proceeds_when_mentioned(self):
+        with patch.object(scout, "SCOUT_COMMENT_TRIGGER_MENTION", True):
+            assert scout._should_skip_comment_event(self._event(body="@scout please look")) is None
+
+
+# ---------------------------------------------------------------------------
+# GitHub error messaging (permission / scope failures)
+# ---------------------------------------------------------------------------
+
+class TestGitHubErrorMessaging:
+    def test_is_permission_error_true_for_403(self):
+        assert scout._is_permission_error(_github_exc(403)) is True
+
+    def test_is_permission_error_true_for_401(self):
+        assert scout._is_permission_error(_github_exc(401)) is True
+
+    def test_is_permission_error_false_for_404(self):
+        assert scout._is_permission_error(_github_exc(404)) is False
+
+    def test_is_permission_error_false_for_non_github_exception(self):
+        assert scout._is_permission_error(RuntimeError("boom")) is False
+
+    def test_explain_403_includes_actionable_permission_help(self):
+        msg = scout._explain_github_error(_github_exc(403, "Resource not accessible by integration"))
+        assert "issues: write" in msg
+        assert "contents: read" in msg
+        # The underlying GitHub detail and status are surfaced too.
+        assert "Resource not accessible by integration" in msg
+        assert "403" in msg
+
+    def test_explain_non_permission_error_omits_help(self):
+        msg = scout._explain_github_error(_github_exc(500, "Server error"))
+        assert "issues: write" not in msg
+        assert "500" in msg
+        assert "Server error" in msg
+
+
+# ---------------------------------------------------------------------------
+# main(): GitHub setup failures degrade gracefully
+# ---------------------------------------------------------------------------
+
+class TestMainGitHubFailures:
+    def test_react_best_effort_swallows_permission_error(self):
+        provider = MagicMock()
+        provider.add_reaction.side_effect = _github_exc(403)
+        # Must not raise — reacting is not essential to triage.
+        scout._react(provider, 42, None)
+
+    def test_react_falls_back_to_issue_when_comment_reaction_fails(self):
+        provider = MagicMock()
+        provider.add_comment_reaction.side_effect = _github_exc(404)
+        scout._react(provider, 42, 99)
+        provider.add_reaction.assert_called_once_with(42, "eyes")
+
+    def test_provider_construction_permission_error_exits_cleanly(self, caplog):
+        # A 403 building the provider exits non-zero with the actionable message,
+        # not an unhandled traceback.
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "", "ISSUE_NUMBER": "42"}):
+            with patch("scout.triage.GitHubProvider", side_effect=_github_exc(403, "Resource not accessible by integration")):
+                with pytest.raises(SystemExit) as exc:
+                    scout.main()
+        assert exc.value.code == 1
+        assert "issues: write" in caplog.text
+
+    def test_get_issue_data_permission_error_exits_cleanly(self, caplog):
+        # Provider builds, the best-effort reaction is attempted, then reading the
+        # issue fails with 403 → clean exit before the agent ever runs.
+        provider = MagicMock()
+        provider.get_issue_data.side_effect = _github_exc(403, "Resource not accessible by integration")
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "", "ISSUE_NUMBER": "42"}):
+            with patch("scout.triage.GitHubProvider", return_value=provider):
+                with pytest.raises(SystemExit) as exc:
+                    scout.main()
+        assert exc.value.code == 1
+        assert "issues: write" in caplog.text
+        provider.add_reaction.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # _load_system_prompt
@@ -377,6 +516,69 @@ class TestGitHubProviderGetFileContents:
 
 
 # ---------------------------------------------------------------------------
+# GitHubProvider.get_issue_data
+# ---------------------------------------------------------------------------
+
+class TestGitHubProviderGetIssueData:
+    def setup_method(self):
+        self.provider = _make_github_provider()
+
+    @staticmethod
+    def _comment(login: str, body: str, association: str) -> MagicMock:
+        c = MagicMock()
+        c.user.login = login
+        c.body = body
+        c.author_association = association
+        return c
+
+    def _issue(self, comments):
+        issue = MagicMock()
+        issue.number = 5
+        issue.title = "t"
+        issue.body = "b"
+        issue.state = "open"
+        issue.user.login = "alice"
+        issue.author_association = "OWNER"
+        issue.labels = [_label("bug")]
+        issue.get_comments.return_value = comments
+        self.provider._repo.get_issue.return_value = issue
+        return issue
+
+    def test_captures_issue_author_association(self):
+        self._issue([])
+        assert self.provider.get_issue_data(5)["author_association"] == "OWNER"
+
+    def test_human_comment_role_and_association(self):
+        self._issue([self._comment("carol", "me too", "CONTRIBUTOR")])
+        comment = self.provider.get_issue_data(5)["comments"][0]
+        assert comment["association"] == "CONTRIBUTOR"
+        assert comment["role"] == "user"
+
+    def test_scout_comment_detected_even_past_truncation(self):
+        # The marker is appended at the end; a long Scout comment would have it
+        # cut by the 500-char body truncation, so detection must use the full body.
+        long_body = "Scout analysis. " * 100 + "<!-- scout-feedback trace_id=abc-123 -->"
+        assert len(long_body) > 500
+        self._issue([self._comment("scout[bot]", long_body, "NONE")])
+        comment = self.provider.get_issue_data(5)["comments"][0]
+        assert comment["role"] == "assistant"
+        assert len(comment["body"]) <= 500
+
+    def test_comment_body_truncated_to_500(self):
+        self._issue([self._comment("alice", "x" * 600, "NONE")])
+        assert len(self.provider.get_issue_data(5)["comments"][0]["body"]) == 500
+
+    def test_keeps_most_recent_20_comments(self):
+        # get_comments() is oldest-first; on a comment trigger the newest comments
+        # (incl. the one that fired the run) must survive, so we keep the tail.
+        self._issue([self._comment("u", f"c{i}", "NONE") for i in range(25)])
+        bodies = [c["body"] for c in self.provider.get_issue_data(5)["comments"]]
+        assert len(bodies) == 20
+        assert bodies[0] == "c5"
+        assert bodies[-1] == "c24"
+
+
+# ---------------------------------------------------------------------------
 # build_repo_context  (moved to agent.py)
 # ---------------------------------------------------------------------------
 
@@ -401,15 +603,16 @@ class TestBuildRepoContext:
 
 
 # ---------------------------------------------------------------------------
-# build_issue_message  (moved to agent.py)
+# build_conversation  (agent.py)
 # ---------------------------------------------------------------------------
 
-class TestBuildIssueMessage:
+class TestBuildConversation:
     def _issue(self, **overrides):
         base = {
             "number": 1,
             "title": "Something broke",
             "author": "user1",
+            "author_association": "NONE",
             "labels": [],
             "state": "open",
             "body": "It does not work.",
@@ -418,30 +621,88 @@ class TestBuildIssueMessage:
         base.update(overrides)
         return base
 
-    def test_contains_title_and_body(self):
-        msg = agent.build_issue_message(self._issue())
-        assert "Something broke" in msg
-        assert "It does not work." in msg
+    def test_first_turn_is_user_with_title_and_body(self):
+        messages, _ = agent.build_conversation(self._issue())
+        assert messages[0]["role"] == "user"
+        assert "Something broke" in messages[0]["content"]
+        assert "It does not work." in messages[0]["content"]
 
-    def test_contains_comments(self):
-        issue = self._issue(comments=[{"author": "alice", "body": "Me too!"}])
-        msg = agent.build_issue_message(issue)
-        assert "alice" in msg
-        assert "Me too!" in msg
+    def test_reporter_labeled_with_association(self):
+        messages, _ = agent.build_conversation(
+            self._issue(author="alice", author_association="OWNER")
+        )
+        assert "[alice (OWNER)]" in messages[0]["content"]
 
-    def test_does_not_contain_repo_tree_or_readme(self):
-        msg = agent.build_issue_message(self._issue())
-        assert "Repository root" not in msg
-        assert "Repository README" not in msg
+    def test_human_comments_prefixed_with_author_and_association(self):
+        issue = self._issue(comments=[
+            {"author": "gituser23", "association": "CONTRIBUTOR", "body": "How do I do that?", "role": "user"},
+        ])
+        messages, _ = agent.build_conversation(issue)
+        joined = "\n".join(m["content"] for m in messages)
+        assert "[gituser23 (CONTRIBUTOR)]: How do I do that?" in joined
+
+    def test_scout_comments_become_assistant_turns(self):
+        issue = self._issue(comments=[
+            {"author": "carol", "association": "MEMBER", "body": "Any update?", "role": "user"},
+            {"author": "scout-bot", "association": "NONE", "body": "Looking into it.", "role": "assistant"},
+            {"author": "carol", "association": "MEMBER", "body": "Thanks!", "role": "user"},
+        ])
+        messages, _ = agent.build_conversation(issue)
+        roles = [m["role"] for m in messages]
+        # The assistant turn appears between user turns; no role-prefix leaks in.
+        assert "assistant" in roles
+        assistant = next(m for m in messages if m["role"] == "assistant")
+        assert assistant["content"] == "Looking into it."
+
+    def test_roles_strictly_alternate(self):
+        # Consecutive human comments (all 'user') must be merged so the Messages
+        # API sees alternating roles.
+        issue = self._issue(comments=[
+            {"author": "a", "association": "NONE", "body": "one", "role": "user"},
+            {"author": "b", "association": "NONE", "body": "two", "role": "user"},
+            {"author": "scout-bot", "association": "NONE", "body": "reply", "role": "assistant"},
+            {"author": "c", "association": "NONE", "body": "three", "role": "user"},
+        ])
+        messages, _ = agent.build_conversation(issue)
+        roles = [m["role"] for m in messages]
+        assert all(a != b for a, b in zip(roles, roles[1:])), roles
+        assert roles[0] == "user"
+
+    def test_merged_user_turn_preserves_each_speaker(self):
+        issue = self._issue(comments=[
+            {"author": "a", "association": "NONE", "body": "one", "role": "user"},
+            {"author": "b", "association": "MEMBER", "body": "two", "role": "user"},
+        ])
+        messages, _ = agent.build_conversation(issue)
+        joined = "\n".join(m["content"] for m in messages)
+        assert "[a (NONE)]: one" in joined
+        assert "[b (MEMBER)]: two" in joined
+
+    def test_latest_turn_is_most_recent_human_comment(self):
+        issue = self._issue(comments=[
+            {"author": "a", "association": "NONE", "body": "first", "role": "user"},
+            {"author": "scout-bot", "association": "NONE", "body": "reply", "role": "assistant"},
+            {"author": "bob", "association": "MEMBER", "body": "the latest question", "role": "user"},
+        ])
+        _, latest = agent.build_conversation(issue)
+        assert latest == "[bob (MEMBER)]: the latest question"
+
+    def test_latest_turn_defaults_to_issue_body_when_no_comments(self):
+        _, latest = agent.build_conversation(self._issue(author="alice", body="the bug"))
+        assert "[alice (NONE)]: the bug" in latest
+
+    def test_final_instruction_present(self):
+        messages, _ = agent.build_conversation(self._issue())
+        assert "most recent comment" in messages[-1]["content"]
 
     def test_labels_shown(self):
-        msg = agent.build_issue_message(self._issue(labels=["bug", "help wanted"]))
-        assert "bug" in msg
-        assert "help wanted" in msg
+        messages, _ = agent.build_conversation(self._issue(labels=["bug", "help wanted"]))
+        assert "bug" in messages[0]["content"]
+        assert "help wanted" in messages[0]["content"]
 
     def test_no_labels_shows_none(self):
-        msg = agent.build_issue_message(self._issue(labels=[]))
-        assert "none" in msg
+        messages, _ = agent.build_conversation(self._issue(labels=[]))
+        assert "none" in messages[0]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +823,59 @@ class TestGitHubSimulator:
         assert sim.fetch_readme() is None
         sim.set_readme("# Repo")
         assert sim.fetch_readme() == "# Repo"
+
+    def test_add_comment_appends_with_association(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        sim.add_comment(7, author="alice", body="hello", association="MEMBER")
+        comment = sim.get_issue_data(7)["comments"][0]
+        assert comment == {"author": "alice", "body": "hello", "association": "MEMBER", "role": "user"}
+
+    def test_get_issue_data_normalizes_comment_role_and_association(self):
+        sim = GitHubSimulator().add_issue(
+            7, title="t", body="b",
+            comments=[{"author": "alice", "body": "hi"}, {"author": "scout-bot", "body": "reply"}],
+        )
+        comments = sim.get_issue_data(7)["comments"]
+        assert comments[0]["association"] == "NONE"
+        assert comments[0]["role"] == "user"
+        # scout-bot authored comments are treated as assistant turns.
+        assert comments[1]["role"] == "assistant"
+
+    def test_get_issue_data_includes_author_association(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b", author_association="OWNER")
+        assert sim.get_issue_data(7)["author_association"] == "OWNER"
+
+    def test_get_issue_data_defaults_author_association(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        assert sim.get_issue_data(7)["author_association"] == "NONE"
+
+    def test_add_comment_explicit_role_overrides(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        sim.add_comment(7, author="x", body="y", role="assistant")
+        assert sim.get_issue_data(7)["comments"][0]["role"] == "assistant"
+
+    def test_comment_body_truncated_to_500_like_real_provider(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        sim.add_comment(7, author="alice", body="x" * 600)
+        assert len(sim.get_issue_data(7)["comments"][0]["body"]) == 500
+
+    def test_keeps_most_recent_20_comments_like_real_provider(self):
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        for i in range(25):
+            sim.add_comment(7, author="u", body=f"c{i}")
+        bodies = [c["body"] for c in sim.get_issue_data(7)["comments"]]
+        assert len(bodies) == 20
+        assert bodies[0] == "c5"
+        assert bodies[-1] == "c24"
+
+    def test_marker_role_detected_before_truncation(self):
+        # Role is computed on the full body, so a long Scout comment whose marker
+        # sits past char 500 is still detected as an assistant turn.
+        sim = GitHubSimulator().add_issue(7, title="t", body="b")
+        sim.add_comment(7, author="ext", body="reply " * 100 + "<!-- scout-feedback trace_id=z -->")
+        comment = sim.get_issue_data(7)["comments"][0]
+        assert comment["role"] == "assistant"
+        assert len(comment["body"]) == 500
 
 
 class TestGitHubSimulatorUpstream:

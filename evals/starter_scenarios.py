@@ -332,12 +332,128 @@ _SEARCH_RATE_LIMITED = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Scenario 6: multi-party comment thread — respond to the latest comment,
+# weighing a maintainer's input, building on Scout's own prior reply
+# ---------------------------------------------------------------------------
+
+_COMMENT_THREAD = {
+    "description": "comment-thread-maintainer-followup",
+    "data": {
+        "scenario_id": "comment-thread-maintainer-followup",
+        "scenario": "default",
+        "spec": {
+            "owner": "trainer-org",
+            "name": "trainer-lib",
+            "readme": TRAINER_LIB_README,
+            "issues": [
+                {
+                    "number": 888,
+                    "title": "Resuming from a checkpoint loses optimizer state",
+                    "body": (
+                        "When I resume training with `--resume path/to/ckpt.pt`, the "
+                        "model weights come back but the optimizer state does not — "
+                        "loss spikes for a few hundred steps as Adam's moment "
+                        "estimates re-warm up. Expected: resuming restores optimizer "
+                        "state too, so training continues seamlessly."
+                    ),
+                    "author": "alice",
+                    "author_association": "NONE",
+                    "state": "open",
+                    "labels": [],
+                    "comments": [
+                        {
+                            "author": "carol",
+                            "association": "CONTRIBUTOR",
+                            "body": (
+                                "Confirmed on my end. Looks like `load_checkpoint` in "
+                                "src/checkpoint.py only restores `model.state_dict()` "
+                                "and never touches the optimizer."
+                            ),
+                        },
+                        {
+                            # A prior Scout reply — rendered as an assistant turn.
+                            "author": "scout-bot",
+                            "association": "NONE",
+                            "body": (
+                                "Hi, I'm Scout 🦉. Early read: the gap looks like it's "
+                                "in `src/checkpoint.py` — `load_checkpoint` restores "
+                                "model weights but not optimizer state. Digging further."
+                            ),
+                        },
+                        {
+                            "author": "bob",
+                            "association": "MEMBER",
+                            "body": (
+                                "Agreed this is the spot. @scout before we fix it: is "
+                                "src/checkpoint.py the only place we'd change, or does "
+                                "Trainer need to construct the optimizer *before* "
+                                "loading so there's a state dict to load into?"
+                            ),
+                        },
+                    ],
+                },
+            ],
+            "files": {
+                "src/checkpoint.py": (
+                    "import torch\n"
+                    "\n"
+                    "def save_checkpoint(path, model, optimizer):\n"
+                    "    torch.save({\n"
+                    "        'model': model.state_dict(),\n"
+                    "        'optimizer': optimizer.state_dict(),\n"
+                    "    }, path)\n"
+                    "\n"
+                    "def load_checkpoint(path, model):\n"
+                    "    # BUG: only the model is restored. The saved 'optimizer'\n"
+                    "    # state dict is ignored, so Adam moments reset on resume.\n"
+                    "    ckpt = torch.load(path)\n"
+                    "    model.load_state_dict(ckpt['model'])\n"
+                ),
+                "src/trainer.py": (
+                    "from .checkpoint import load_checkpoint\n"
+                    "\n"
+                    "class Trainer:\n"
+                    "    def fit(self, resume: str | None = None):\n"
+                    "        self.model = build_model()\n"
+                    "        if resume:\n"
+                    "            # Optimizer is created AFTER load — there's nothing\n"
+                    "            # to load optimizer state into at this point.\n"
+                    "            load_checkpoint(resume, self.model)\n"
+                    "        self.optimizer = build_optimizer(self.model)\n"
+                    "        # ... training loop ...\n"
+                ),
+                "tests/test_checkpoint.py": (
+                    "def test_save_load_roundtrip_model():\n"
+                    "    # only asserts model weights match; optimizer not covered\n"
+                    "    pass\n"
+                ),
+            },
+        },
+        "target_issue": 888,
+        "expected": {
+            "should_escalate": False,
+            "should_cite_issue": None,
+            "root_cause_files": ["src/checkpoint.py", "src/trainer.py"],
+        },
+    },
+    "assertions": [
+        "The response directly answers bob's question about whether src/checkpoint.py is the only change needed.",
+        "The response notes that Trainer constructs the optimizer after load_checkpoint, so the optimizer must be created before loading its state (src/trainer.py).",
+        "The response identifies src/checkpoint.py — load_checkpoint ignores the saved optimizer state dict.",
+        "The response reflects the thread: it acknowledges the maintainer/contributor confirmation rather than re-deriving the cause from scratch.",
+        "final_labels does not contain 'Escalated request'.",
+    ],
+}
+
+
 STARTER_SCENARIOS = [
     _SIMPLE_DUPLICATE,
     _CLEAR_BUG_NO_DUPLICATE,
     _ESCALATION_BREAKING_CHANGE,
     _SPAM_OFF_TOPIC,
     _SEARCH_RATE_LIMITED,
+    _COMMENT_THREAD,
 ]
 
 

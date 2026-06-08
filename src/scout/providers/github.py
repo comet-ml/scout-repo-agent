@@ -3,6 +3,24 @@ from __future__ import annotations
 
 from github import Github, GithubException
 
+from scout.markers import SCOUT_COMMENT_MARKER
+
+
+def _association(obj) -> str:
+    """Author association for an issue or comment — one of GitHub's values
+    (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE...).
+
+    Prefer a typed attribute when PyGithub exposes one, fall back to the raw API
+    payload, and default to 'NONE'. The isinstance guard keeps mocked objects in
+    tests (whose attributes are MagicMocks) from leaking non-string values."""
+    val = getattr(obj, "author_association", None)
+    if not isinstance(val, str):
+        try:
+            val = obj.raw_data.get("author_association")
+        except Exception:
+            val = None
+    return val if isinstance(val, str) and val else "NONE"
+
 
 class GitHubProvider:
     def __init__(self, token: str, owner: str, name: str):
@@ -23,16 +41,27 @@ class GitHubProvider:
 
     def get_issue_data(self, issue_number: int) -> dict:
         issue = self._repo.get_issue(issue_number)
-        comments = [
-            {"author": c.user.login, "body": (c.body or "")[:500]}
-            for c in list(issue.get_comments())[:20]
-        ]
+        # Keep the most recent 20 comments (get_comments() is oldest-first). On a
+        # comment-triggered run the newest comments — including the one that fired
+        # the run — are exactly what Scout must see, so we truncate the old end.
+        comments = []
+        for c in list(issue.get_comments())[-20:]:
+            body = c.body or ""
+            comments.append({
+                "author": c.user.login,
+                "association": _association(c),
+                # Check the marker against the full body before truncating — the
+                # marker is appended at the end and would be cut from long replies.
+                "role": "assistant" if SCOUT_COMMENT_MARKER in body else "user",
+                "body": body[:500],
+            })
         return {
             "number": issue.number,
             "title": issue.title,
             "body": issue.body or "",
             "state": issue.state,
             "author": issue.user.login,
+            "author_association": _association(issue),
             "labels": [lbl.name for lbl in issue.labels],
             "comments": comments,
         }
@@ -93,6 +122,11 @@ class GitHubProvider:
 
     def add_reaction(self, issue_number: int, reaction: str) -> None:
         self._repo.get_issue(issue_number).create_reaction(reaction)
+
+    def add_comment_reaction(self, issue_number: int, comment_id: int, reaction: str) -> None:
+        """React to a specific issue comment (used when a comment, rather than the
+        issue itself, triggered the run)."""
+        self._repo.get_issue(issue_number).get_comment(comment_id).create_reaction(reaction)
 
     def apply_label(self, issue_number: int, label_name: str) -> str:
         issue = self._repo.get_issue(issue_number)

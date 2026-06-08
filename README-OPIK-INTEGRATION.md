@@ -153,6 +153,24 @@ def _search_rate_limited(spec: dict) -> GitHubSimulator:
 
 Most scenarios use `"default"`. The long tail registers a Python builder by name and references it from the JSON. The dataset schema doesn't grow.
 
+### Comment threads and author association
+
+Scout runs on new comments as well as on issue open, so a scenario can model a back-and-forth. An issue spec accepts `author_association` (the reporter's relationship to the repo) and a `comments` list — a flat, chronological list, since GitHub issue comments are not nested. Each comment may carry an `association` and an explicit `role`; comments authored by `scout-bot` (or carrying Scout's hidden marker) are treated as prior Scout replies and rendered as assistant turns:
+
+```json
+{
+  "number": 888, "title": "...", "body": "...",
+  "author": "alice", "author_association": "NONE",
+  "comments": [
+    {"author": "carol", "association": "CONTRIBUTOR", "body": "Confirmed — ..."},
+    {"author": "scout-bot", "body": "Early read: ...", "role": "assistant"},
+    {"author": "bob", "association": "MEMBER", "body": "@scout before we fix it: ..."}
+  ]
+}
+```
+
+`agent.build_conversation` turns this into alternating user/assistant turns, prefixing each human turn with `[author (association)]:` so assertions (and the model) can check that Scout weighed maintainer input and answered the latest comment. See `_COMMENT_THREAD` in `evals/starter_scenarios.py`.
+
 ## Dataset item shape
 
 Each Opik Test Suite item has three top-level keys:

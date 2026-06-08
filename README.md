@@ -1,11 +1,13 @@
 # Scout 🦉
 
-Scout is a GitHub Action that triages new issues using Anthropic. When an issue is opened, Scout:
+Scout is a GitHub Action that triages issues using Anthropic. When an issue is opened — or a new comment is posted on one — Scout:
 
 1. Searches for similar issues and existing workarounds
 2. Explores the source code to find where the problem lives
 3. Posts a structured comment with a solution, code investigation, and next steps
 4. Escalates complex design issues by applying a configurable label
+
+On comment triggers, Scout reads the whole thread as a conversation — each message is attributed to its author and their repository association (OWNER / MEMBER / COLLABORATOR / CONTRIBUTOR / NONE), so it weighs maintainer input accordingly and replies to the latest comment. It ignores its own comments and other bots; set `SCOUT_COMMENT_TRIGGER_MENTION=true` to only respond when a comment @-mentions Scout.
 
 Activity is traced to [Opik](https://opik.com) for observability. Viewers can rate each response with a 👍/👎 reaction, which is synced back to Opik as human feedback — see [Response feedback](#response-feedback).
 
@@ -41,6 +43,8 @@ name: Scout Issue Triage
 on:
   issues:
     types: [opened]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -91,6 +95,7 @@ The GitHub App must have these permissions:
 | `SCOUT_GITHUB_REPO_OWNER` | yes | Repo owner login |
 | `SCOUT_GITHUB_REPO_NAME` | yes | Repo name |
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
+| `SCOUT_COMMENT_TRIGGER_MENTION` | no | If `true`, comment-triggered runs only fire when the comment @-mentions Scout (default: respond to every non-bot comment) |
 | `OPIK_API_KEY` | **yes** | Opik API key. Opik is required — Scout sources its system prompt from Opik and traces every run there. |
 | `OPIK_WORKSPACE` | **yes** | Opik workspace name |
 | `SCOUT_FEEDBACK_SINCE_DAYS` | no | Feedback sync only: how many days back to scan issues for 👍/👎 reactions (default: `7`) |

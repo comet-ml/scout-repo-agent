@@ -160,26 +160,65 @@ def build_repo_context(repo_tree: list[str] | None, readme: str | None) -> str:
     return "\n\n".join(parts)
 
 
-def build_issue_message(issue_data: dict) -> str:
-    """The user turn containing only the issue itself."""
-    comments_text = ""
-    if issue_data["comments"]:
-        formatted = "\n\n".join(
-            f"**@{c['author']}**: {c['body']}" for c in issue_data["comments"]
-        )
-        comments_text = (
-            f"\n\n---\n**Comments ({len(issue_data['comments'])}):**\n\n{formatted}"
-        )
+def _labeled(author: str, association: str, text: str) -> str:
+    """A speaker-attributed line, e.g. '[gituser23 (CONTRIBUTOR)]: ...'. The
+    association lets the model weigh who is speaking (a MEMBER/OWNER carries more
+    authority than a drive-by NONE)."""
+    return f"[{author} ({association})]: {text}"
 
-    return (
+
+def build_conversation(issue_data: dict) -> tuple[list[dict], str]:
+    """Render an issue thread as alternating chat turns.
+
+    The issue body and every human comment become ``user`` turns; Scout's own
+    past comments (``role == "assistant"``) become ``assistant`` turns. Each human
+    turn is prefixed with ``[author (association)]:`` so the model can weigh who is
+    speaking. Consecutive same-role turns are merged because the Messages API
+    expects roles to alternate (several humans commenting in a row are all
+    ``user``).
+
+    Returns ``(messages, latest_human_turn)``. ``latest_human_turn`` is the most
+    recent human message — the thing Scout is being asked to respond to — which
+    the caller records as the Opik thread's input so each run reads as one clean
+    user→assistant turn rather than an ever-growing transcript.
+    """
+    association = issue_data.get("author_association", "NONE")
+    header = (
         f"Issue #{issue_data['number']}: {issue_data['title']}\n\n"
-        f"Reporter: @{issue_data['author']}\n"
+        f"Reporter: [{issue_data['author']} ({association})]\n"
         f"Labels: {', '.join(issue_data['labels']) or 'none'}\n"
         f"State: {issue_data['state']}\n\n"
-        f"{issue_data['body'] or '(no description provided)'}"
-        f"{comments_text}\n\n"
-        "Please triage this issue."
+        + _labeled(
+            issue_data["author"],
+            association,
+            issue_data["body"] or "(no description provided)",
+        )
     )
+
+    turns: list[dict] = [{"role": "user", "content": header}]
+    latest_human = header
+    for c in issue_data.get("comments", []):
+        if c.get("role") == "assistant":
+            turns.append({"role": "assistant", "content": c["body"]})
+        else:
+            text = _labeled(c["author"], c.get("association", "NONE"), c["body"])
+            turns.append({"role": "user", "content": text})
+            latest_human = text
+
+    turns.append({
+        "role": "user",
+        "content": "Please triage this issue and respond to the most recent comment.",
+    })
+
+    # Merge consecutive same-role turns into one — the Messages API requires
+    # alternating user/assistant turns.
+    merged: list[dict] = []
+    for turn in turns:
+        if merged and merged[-1]["role"] == turn["role"]:
+            merged[-1]["content"] += "\n\n" + turn["content"]
+        else:
+            merged.append(dict(turn))
+    return merged, latest_human
 
 
 def run_agent(
@@ -202,14 +241,14 @@ def run_agent(
     tools = make_tools(provider, issue_number, opik_project=opik_project)
     tool_definitions = make_tool_definitions(escalation_tag)
     issue_data = provider.get_issue_data(issue_number)
-    issue_message = build_issue_message(issue_data)
+    conversation, latest_turn = build_conversation(issue_data)
 
-    def _agent(issue_message: str) -> str:
+    def _agent(conversation: list[dict]) -> str:
         repo_tree = provider.list_directory("")
         readme = provider.fetch_readme()
         repo_context = build_repo_context(repo_tree, readme)
 
-        messages = [{"role": "user", "content": issue_message}]
+        messages = [dict(m) for m in conversation]
         system = [
             {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": repo_context, "cache_control": {"type": "ephemeral"}},
@@ -229,16 +268,24 @@ def run_agent(
             messages.append({"role": "assistant", "content": response.content})
 
             if response.stop_reason == "end_turn":
+                reply = next(
+                    (block.text for block in response.content if hasattr(block, "text")),
+                    "Scout completed without producing a text response.",
+                )
                 td = opik_context.get_current_trace_data()
                 if td:
                     trace_id[0] = td.id
+                    # Group every run for this issue into one Opik thread, and
+                    # record just this turn (latest human message in → Scout reply
+                    # out) so the thread reads as a clean dialogue instead of an
+                    # ever-growing transcript. The model still sees the full
+                    # conversation above; only the recorded trace I/O is scoped.
                     opik_context.update_current_trace(
-                        thread_id=f"issue-{repo_owner}-{repo_name}-{issue_number}"
+                        thread_id=f"issue-{repo_owner}-{repo_name}-{issue_number}",
+                        input={"latest_comment": latest_turn},
+                        output={"response": reply},
                     )
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        return block.text
-                return "Scout completed without producing a text response."
+                return reply
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -271,8 +318,8 @@ def run_agent(
             project_name=opik_project,
             tags=["scout-repo-agent"],
         )(_agent)
-        text = tracked(issue_message)
+        text = tracked(conversation)
     else:
-        text = _agent(issue_message)
+        text = _agent(conversation)
 
     return text, trace_id[0]

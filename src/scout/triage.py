@@ -92,11 +92,14 @@ REPO_OWNER, REPO_NAME = _get_repo_owner_name()
 # Opik setup
 # ---------------------------------------------------------------------------
 
+OPIK_PROJECT = f"scout:{REPO_OWNER}/{REPO_NAME}"
+
 # Opik is required; configuration failure is fatal.
 try:
     opik.configure(
         api_key=OPIK_API_KEY,
         workspace=OPIK_WORKSPACE,
+        project_name=OPIK_PROJECT,
         force=True,
         automatic_approvals=True,
     )
@@ -104,8 +107,6 @@ except Exception as e:
     raise RuntimeError(f"Opik configuration failed (Opik is required): {e}") from e
 
 _opik_enabled = True
-
-OPIK_PROJECT = f"scout:{REPO_OWNER}/{REPO_NAME}"
 
 
 def _get_opik_project_id() -> str | None:

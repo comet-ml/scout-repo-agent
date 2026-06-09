@@ -9,7 +9,6 @@ Opik as a new version of the same chat prompt.
 Env vars (on top of the normal Scout config in .env):
     SCOUT_OPIK_PROMPT_NAME        — chat prompt to optimise (default: scout-triage-system-prompt)
     SCOUT_OFFLINE_DATASET_NAME    — Opik dataset name (default: scout-issues-with-github-sim)
-    SCOUT_OFFLINE_OPIK_PROJECT    — Opik project for traces (default: scout-prompt-optimisation)
 """
 from __future__ import annotations
 
@@ -29,6 +28,7 @@ sys.path.insert(0, _repo_root)
 sys.path.insert(0, os.path.join(_repo_root, "src"))
 
 import opik
+from opik.evaluation.metrics import AnswerRelevance
 from dotenv import load_dotenv
 from opik_optimizer import ChatPrompt, MetaPromptOptimizer
 from opik_optimizer.agents.optimizable_agent import OptimizableAgent
@@ -43,20 +43,21 @@ from scout.triage import (
     MODEL,
     OPIK_PROJECT,
     SCOUT_ESCALATION_TAG,
-    _system_messages,
-    _text_from_chat_prompt,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATASET_NAME = os.environ.get("SCOUT_OFFLINE_DATASET_NAME", "scout-issues-with-github-sim")
-EVAL_OPIK_PROJECT = os.environ.get("SCOUT_OFFLINE_OPIK_PROJECT", "scout-prompt-optimisation")
 PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "scout-triage-system-prompt")
 
 
 class ScoutAgent(OptimizableAgent):
     """Runs the full Scout agent loop for one dataset item using the simulated GitHub environment."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._client = make_client(ANTHROPIC_API_KEY, opik_project=OPIK_PROJECT)
 
     def invoke_agent(
         self,
@@ -65,28 +66,37 @@ class ScoutAgent(OptimizableAgent):
         allow_tool_use: bool = False,
         seed: int | None = None,
     ) -> str:
-        system_prompt = next(iter(prompts.values())).system or ""
+        prompt = next(iter(prompts.values()))
+
+        # get_messages handles both system= and messages= formats and substitutes
+        # {issue_message} from dataset_item automatically.
+        messages = prompt.get_messages(dataset_item)
+        system_prompt = next(
+            (m["content"] for m in messages if m.get("role") == "system"), ""
+        )
+        if not system_prompt:
+            logger.warning("invoke_agent: no system prompt in candidate — skipping")
+            return ""
+
         data = dataset_item.get("data", dataset_item)
         scenario = data.get("scenario", "default")
         spec = data["spec"]
         target = int(data["target_issue"])
 
         sim = build(scenario, spec)
-        client = make_client(ANTHROPIC_API_KEY, opik_project=EVAL_OPIK_PROJECT)
-
         comment, _ = run_agent(
             sim,
             target,
-            client=client,
+            client=self._client,
             system_prompt=system_prompt,
             escalation_tag=SCOUT_ESCALATION_TAG,
             repo_owner=sim.owner,
             repo_name=sim.name,
-            opik_project=EVAL_OPIK_PROJECT,
+            opik_project=OPIK_PROJECT,
             model=MODEL,
             max_tokens=MAX_TOKENS,
         )
-        return comment
+        return comment or ""
 
 
 def escalation_accuracy(dataset_item: dict, llm_output: str) -> float:
@@ -106,6 +116,36 @@ def escalation_accuracy(dataset_item: dict, llm_output: str) -> float:
 
     return 1.0 if output_escalated == should_escalate else 0.0
 
+_answer_relevance_metric = AnswerRelevance(
+    model="anthropic/claude-haiku-4-5-20251001",
+    project_name=OPIK_PROJECT,
+    require_context=False,
+)
+
+
+def answer_relevance(dataset_item: dict, llm_output: str) -> float:
+    result = _answer_relevance_metric.score(
+        input=dataset_item["issue_message"],
+        output=llm_output,
+    )
+    return result.value
+
+
+def scout_quality(dataset_item: dict, llm_output: str) -> float:
+    """Combined metric: structural completeness (50%) + escalation accuracy (50%)."""
+    required_sections = ["## Solution", "## Code Investigation", "## Next Steps"]
+    structure_score = sum(s in llm_output for s in required_sections) / len(required_sections)
+
+    data = dataset_item.get("data", dataset_item)
+    expected = data.get("expected", {})
+    if "should_escalate" in expected:
+        escalated = SCOUT_ESCALATION_TAG.lower() in llm_output.lower()
+        escalation_score = 1.0 if escalated == expected["should_escalate"] else 0.0
+    else:
+        escalation_score = 1.0
+
+    return 0.5 * structure_score + 0.5 * escalation_score
+
 
 def main() -> None:
     opik_client = opik.Opik()
@@ -118,8 +158,9 @@ def main() -> None:
     if chat_prompt_obj is None:
         sys.exit(f"ERROR: Opik chat prompt {PROMPT_NAME!r} not found in project {OPIK_PROJECT!r}.")
 
-    system_message = _text_from_chat_prompt(chat_prompt_obj)
-    initial_prompt = ChatPrompt(system=system_message, user="{issue_message}")
+    initial_prompt = ChatPrompt(
+        messages=[*chat_prompt_obj.template, {"role": "user", "content": "{issue_message}"}]
+    )
 
     optimizer = MetaPromptOptimizer(
         model=f"anthropic/{MODEL}",
@@ -128,6 +169,7 @@ def main() -> None:
         n_threads=4,
         enable_context=True,
         seed=42,
+        skip_perfect_score=False,
     )
 
     logger.info("Starting optimisation: prompt=%r  dataset=%r", PROMPT_NAME, DATASET_NAME)
@@ -135,19 +177,24 @@ def main() -> None:
     result = optimizer.optimize_prompt(
         prompt=initial_prompt,
         dataset=dataset,
-        metric=escalation_accuracy,
-        agent=ScoutAgent(project_name=EVAL_OPIK_PROJECT),
+        metric=scout_quality,
+        agent=ScoutAgent(project_name=OPIK_PROJECT),
         n_samples=10,
+        project_name=OPIK_PROJECT,
+        max_trials=2,
     )
 
     result.display()
 
-    # Save the best system prompt back to Opik as a new version of the chat prompt.
+    # Save the best prompt back to Opik — strip the user template, keep only system messages.
     best_prompt = result.prompt if isinstance(result.prompt, ChatPrompt) else list(result.prompt.values())[0]
-    best_system = best_prompt.system or ""
+    all_messages = best_prompt.messages or (
+        [{"role": "system", "content": best_prompt.system}] if best_prompt.system else []
+    )
+    system_messages = [m for m in all_messages if m.get("role") == "system"]
     opik_client.create_chat_prompt(
         name=PROMPT_NAME,
-        messages=_system_messages(best_system),
+        messages=system_messages,
         project_name=OPIK_PROJECT,
     )
     logger.info("Best prompt saved to Opik under %r as a new version.", PROMPT_NAME)

@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(_repo_root, "src"))
 
 import opik  # noqa: E402
 from opik.evaluation.metrics import AnswerRelevance  # noqa: E402
+from opik.evaluation.metrics.score_result import ScoreResult  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from opik_optimizer import ChatPrompt, MetaPromptOptimizer  # noqa: E402
 from opik_optimizer.agents.optimizable_agent import OptimizableAgent  # noqa: E402
@@ -48,7 +49,7 @@ from scout.triage import (  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATASET_NAME = os.environ.get("SCOUT_OFFLINE_DATASET_NAME", "scout-issues-with-github-sim")
+DATASET_NAME = os.environ.get("SCOUT_OFFLINE_DATASET_NAME", "scout-triage-optimisation-runs-v2")
 PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "scout-triage-system-prompt-initial")
 
 
@@ -147,6 +148,31 @@ def scout_quality(dataset_item: dict, llm_output: str) -> float:
     return 0.5 * structure_score + 0.5 * escalation_score
 
 
+def flag_only_metric(dataset_item: dict, llm_output: str) -> ScoreResult:
+    """Phase 1 — escalation flag correctness only. No LLM judge call.
+
+    Maps the actual dataset shape (data.expected.should_escalate) and plain-string
+    agent output (escalation detected via SCOUT_ESCALATION_TAG) to the dev-plan
+    flag_only_metric interface.
+    """
+    data = dataset_item.get("data", dataset_item)
+    expected = data.get("expected", {})
+
+    if "should_escalate" not in expected:
+        # No ground truth for this item — treat as correct so it doesn't dilute signal.
+        return ScoreResult(name="flag_accuracy", value=1.0, reason="No expected flag — skipped.")
+
+    should_escalate: bool = expected["should_escalate"]
+    output_escalated = SCOUT_ESCALATION_TAG.lower() in llm_output.lower()
+    correct = output_escalated == should_escalate
+
+    return ScoreResult(
+        name="flag_accuracy",
+        value=1.0 if correct else 0.0,
+        reason="Flag correct." if correct else f"Flag wrong — expected escalate={should_escalate}.",
+    )
+
+
 def main() -> None:
     opik_client = opik.Opik()
     dataset = opik_client.get_dataset(DATASET_NAME)
@@ -177,7 +203,7 @@ def main() -> None:
     result = optimizer.optimize_prompt(
         prompt=initial_prompt,
         dataset=dataset,
-        metric=scout_quality,
+        metric=flag_only_metric,
         agent=ScoutAgent(project_name=OPIK_PROJECT),
         n_samples=10,
         project_name=OPIK_PROJECT,

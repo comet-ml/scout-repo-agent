@@ -27,17 +27,17 @@ _repo_root = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, _repo_root)
 sys.path.insert(0, os.path.join(_repo_root, "src"))
 
-import opik
-from opik.evaluation.metrics import AnswerRelevance
-from dotenv import load_dotenv
-from opik_optimizer import ChatPrompt, MetaPromptOptimizer
-from opik_optimizer.agents.optimizable_agent import OptimizableAgent
+import opik  # noqa: E402
+from opik.evaluation.metrics import AnswerRelevance  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
+from opik_optimizer import ChatPrompt, MetaPromptOptimizer  # noqa: E402
+from opik_optimizer.agents.optimizable_agent import OptimizableAgent  # noqa: E402
 
 load_dotenv()
 
-from scout.agent import make_client, run_agent
-from scout.providers.scenarios import build
-from scout.triage import (
+from scout.agent import make_client, run_agent  # noqa: E402
+from scout.providers.scenarios import build  # noqa: E402
+from scout.triage import (  # noqa: E402
     ANTHROPIC_API_KEY,
     MAX_TOKENS,
     MODEL,

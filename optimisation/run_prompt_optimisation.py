@@ -49,7 +49,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATASET_NAME = os.environ.get("SCOUT_OFFLINE_DATASET_NAME", "scout-issues-with-github-sim")
-PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "scout-triage-system-prompt")
+PROMPT_NAME = os.environ.get("SCOUT_OPIK_PROMPT_NAME", "scout-triage-system-prompt-initial")
 
 
 class ScoutAgent(OptimizableAgent):

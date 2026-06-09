@@ -100,7 +100,6 @@ try:
         api_key=OPIK_API_KEY,
         workspace=OPIK_WORKSPACE,
         project_name=OPIK_PROJECT,
-        force=True,
         automatic_approvals=True,
     )
 except Exception as e:

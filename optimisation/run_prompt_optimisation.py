@@ -29,8 +29,6 @@ sys.path.insert(0, _repo_root)
 sys.path.insert(0, os.path.join(_repo_root, "src"))
 
 import opik  # noqa: E402
-from opik.evaluation.metrics import AnswerRelevance  # noqa: E402
-from opik.evaluation.metrics.score_result import ScoreResult  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from opik_optimizer import ChatPrompt, MetaPromptOptimizer  # noqa: E402
 from opik_optimizer.agents.optimizable_agent import OptimizableAgent  # noqa: E402
@@ -47,6 +45,7 @@ from scout.triage import (  # noqa: E402
     OPIK_PROJECT,
     SCOUT_ESCALATION_TAG,
 )
+from metrics import triage_accuracy  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -101,90 +100,6 @@ class ScoutAgent(OptimizableAgent):
         return json.dumps({"comment": comment or "", "escalated": escalated})
 
 
-def _parse_output(llm_output: str) -> tuple[str, bool]:
-    """Parse invoke_agent output into (comment, escalated).
-
-    invoke_agent returns JSON with {"comment": str, "escalated": bool}.
-    Falls back to plain string + tag-in-text detection for safety.
-    """
-    try:
-        parsed = json.loads(llm_output)
-        return parsed["comment"], bool(parsed["escalated"])
-    except (json.JSONDecodeError, KeyError):
-        return llm_output, SCOUT_ESCALATION_TAG.lower() in llm_output.lower()
-
-
-def escalation_accuracy(dataset_item: dict, llm_output: str) -> float:
-    """Score 1.0 if escalation decision matches expected, 0.0 otherwise.
-
-    Items without an expected.should_escalate field score 1.0 so they don't
-    dilute the signal.
-    """
-    data = dataset_item.get("data", dataset_item)
-    expected = data.get("expected", {})
-
-    if "should_escalate" not in expected:
-        return 1.0
-
-    _, output_escalated = _parse_output(llm_output)
-    return 1.0 if output_escalated == expected["should_escalate"] else 0.0
-
-_answer_relevance_metric = AnswerRelevance(
-    model="anthropic/claude-haiku-4-5-20251001",
-    project_name=OPIK_PROJECT,
-    require_context=False,
-)
-
-
-def answer_relevance(dataset_item: dict, llm_output: str) -> float:
-    comment, _ = _parse_output(llm_output)
-    result = _answer_relevance_metric.score(
-        input=dataset_item["issue_message"],
-        output=comment,
-    )
-    return result.value
-
-
-def scout_quality(dataset_item: dict, llm_output: str) -> float:
-    """Combined metric: structural completeness (50%) + escalation accuracy (50%)."""
-    comment, output_escalated = _parse_output(llm_output)
-
-    required_sections = ["## Solution", "## Code Investigation", "## Next Steps"]
-    structure_score = sum(s in comment for s in required_sections) / len(required_sections)
-
-    data = dataset_item.get("data", dataset_item)
-    expected = data.get("expected", {})
-    if "should_escalate" in expected:
-        escalation_score = 1.0 if output_escalated == expected["should_escalate"] else 0.0
-    else:
-        escalation_score = 1.0
-
-    return 0.5 * structure_score + 0.5 * escalation_score
-
-
-def flag_only_metric(dataset_item: dict, llm_output: str) -> ScoreResult:
-    """Phase 1 — escalation flag correctness only. No LLM judge call.
-
-    Reads escalation state from the simulator label (via JSON output from
-    invoke_agent) — the ground truth for whether apply_label() was called.
-    """
-    data = dataset_item.get("data", dataset_item)
-    expected = data.get("expected", {})
-
-    if "should_escalate" not in expected:
-        return ScoreResult(name="flag_accuracy", value=1.0, reason="No expected flag — skipped.")
-
-    should_escalate: bool = expected["should_escalate"]
-    _, output_escalated = _parse_output(llm_output)
-    correct = output_escalated == should_escalate
-
-    return ScoreResult(
-        name="flag_accuracy",
-        value=1.0 if correct else 0.0,
-        reason="Flag correct." if correct else f"Flag wrong — expected escalate={should_escalate}.",
-    )
-
-
 def _scout_reasoning_override(prompts: PromptLibrary) -> None:
     """Inject Scout-specific task context into the meta-LLM's reasoning prompt.
 
@@ -205,6 +120,11 @@ Escalation means: the issue requires a major design decision, breaking API chang
 architectural discussion that needs maintainer consensus.
 No escalation means: bugs, feature requests, duplicate reports, spam — things Scout
 can investigate and respond to directly.
+
+The metric scoring Scout evaluates both escalation accuracy (60%) and reply quality (40%).
+A high-quality reply: introduces Scout by name, uses a friendly tone, does NOT suggest
+code fixes, asks for repro steps when a bug is suspected, and is consistent with the
+escalation decision.
 
 Scout has access to tools that explore the repository codebase and search existing issues.
 It does NOT use template variables in its prompt — do not add placeholders like {data} or
@@ -242,7 +162,7 @@ def main() -> None:
     result = optimizer.optimize_prompt(
         prompt=initial_prompt,
         dataset=dataset,
-        metric=flag_only_metric,
+        metric=triage_accuracy,
         agent=ScoutAgent(project_name=OPIK_PROJECT),
         n_samples=10,
         project_name=OPIK_PROJECT,

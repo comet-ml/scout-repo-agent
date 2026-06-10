@@ -120,7 +120,6 @@ def main() -> None:
     opik.configure(
         api_key=opik_api_key,
         workspace=opik_workspace,
-        force=True,
         automatic_approvals=True,
     )
     opik_client = opik.Opik()

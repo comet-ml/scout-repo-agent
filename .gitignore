@@ -9,3 +9,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Generated files
+*.csv
+*.lock
+*.json

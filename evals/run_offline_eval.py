@@ -27,7 +27,7 @@ import sys
 # the import succeeds — the eval never uses ISSUE_NUMBER from triage directly.
 os.environ.setdefault("ISSUE_NUMBER", "1")
 
-# Resolve the repo root so relative imports work when run from the tests/ dir.
+# Resolve the repo root so relative imports work when run from the evals/ dir.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from datetime import datetime
@@ -66,7 +66,7 @@ def eval_task(item: dict) -> dict:
         keys = list(data.keys())
         raise ValueError(
             f"Dataset item is missing 'spec' or 'target_issue'. Got keys: {keys}. "
-            "Re-seed the dataset using tests/utils/seed_offline_dataset.py — "
+            "Re-seed the dataset using evals/utils/seed_offline_dataset.py — "
             "old CSV-format rows must be removed first (delete the dataset in the Opik UI)."
         )
     scenario = data.get("scenario", "default")

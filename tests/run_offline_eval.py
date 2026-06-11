@@ -23,8 +23,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
-# scout.py calls _get_issue_number() at module level; give it a dummy value so
-# the import succeeds — the eval never uses ISSUE_NUMBER from scout directly.
+# scout.triage calls _get_issue_number() at module level; give it a dummy value so
+# the import succeeds — the eval never uses ISSUE_NUMBER from triage directly.
 os.environ.setdefault("ISSUE_NUMBER", "1")
 
 # Resolve the repo root so relative imports work when run from the tests/ dir.
@@ -38,14 +38,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent import make_client, run_agent  # noqa: E402
-from providers.scenarios import build  # noqa: E402
-from scout import (  # noqa: E402
+from scout.agent import make_client, run_agent  # noqa: E402
+from scout.providers.scenarios import build  # noqa: E402
+from scout.triage import (  # noqa: E402
     ANTHROPIC_API_KEY,
     MAX_TOKENS,
     MODEL,
     SCOUT_ESCALATION_TAG,
-    SYSTEM_PROMPT,
+    load_system_prompt,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -81,7 +81,7 @@ def eval_task(item: dict) -> dict:
         sim,
         target,
         client=client,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=load_system_prompt(),
         escalation_tag=SCOUT_ESCALATION_TAG,
         repo_owner=sim.owner,
         repo_name=sim.name,

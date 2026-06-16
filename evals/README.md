@@ -53,28 +53,28 @@ Every item in the Opik dataset must follow this shape:
 
 ## Step 1 — Seed the dataset
 
-`tests/utils/seed_offline_dataset.py` inserts items into an Opik dataset. Two sources can be combined in one run:
+`evals/utils/seed_offline_dataset.py` inserts items into an Opik dataset. Two sources can be combined in one run:
 
 **From a CSV** (issues captured by `fetch_test_issues.py` — real-GitHub file mode):
 
 ```bash
 # First fetch issues into a CSV:
-python tests/utils/fetch_test_issues.py --count 10 --state open
+python evals/utils/fetch_test_issues.py --count 10 --state open
 
 # Then seed the dataset:
-python tests/utils/seed_offline_dataset.py --from-csv test_issues.csv
+python evals/utils/seed_offline_dataset.py --from-csv test_issues.csv
 ```
 
 **From the starter scenarios** (fully simulated, no network required):
 
 ```bash
-python tests/utils/seed_offline_dataset.py --from-starter
+python evals/utils/seed_offline_dataset.py --from-starter
 ```
 
 **Both at once:**
 
 ```bash
-python tests/utils/seed_offline_dataset.py --from-csv test_issues.csv --from-starter
+python evals/utils/seed_offline_dataset.py --from-csv test_issues.csv --from-starter
 ```
 
 The script creates the dataset if it doesn't exist, or appends to an existing one. To start clean, delete the dataset in the Opik UI before re-seeding.
@@ -84,7 +84,7 @@ The script creates the dataset if it doesn't exist, or appends to an existing on
 ## Step 2 — Run the eval
 
 ```bash
-python tests/run_offline_eval.py
+python evals/run_offline_eval.py
 ```
 
 Results and traces are logged to Opik under the project set in `SCOUT_OFFLINE_OPIK_PROJECT`. Each run gets a unique timestamped experiment name so results are easy to compare across runs.

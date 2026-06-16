@@ -1,15 +1,31 @@
 #!/usr/bin/env python3
-"""Fetch issues from scout-test-repo and save them as a CSV for local testing.
+"""Fetch issues from a GitHub repository and save them as JSON.
 
 Usage:
-    python fetch_test_issues.py [--count N] [--state open|closed|all] [--out FILE]
+    python fetch_github_issues.py [--repo owner/name] [--count N] [--state open|closed|all] [--out FILE]
 
-Defaults: 10 issues, open state, output to test_issues.csv
+Defaults: 10 issues, open state, output to github_issues.json
+
+The output JSON has the shape:
+    {
+      "repo": {"owner": "...", "name": "..."},
+      "issues": [
+        {
+          "number": 42,
+          "title": "...",
+          "body": "...",
+          "state": "open",
+          "author": "alice",
+          "labels": ["bug"],
+          "comments": [{"author": "bob", "body": "..."}]
+        },
+        ...
+      ]
+    }
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import sys
@@ -17,10 +33,10 @@ import sys
 from dotenv import load_dotenv
 from github import Github
 
-load_dotenv()
+load_dotenv(override=True)
 
 
-def get_issue_data(issue_obj) -> dict:
+def fetch_issue(issue_obj) -> dict:
     comments = []
     for c in list(issue_obj.get_comments())[:20]:
         comments.append({"author": c.user.login, "body": (c.body or "")[:500]})
@@ -39,7 +55,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=10, help="Number of issues to fetch")
     parser.add_argument("--state", default="open", choices=["open", "closed", "all"])
-    parser.add_argument("--out", default="test_issues.csv", help="Output CSV path")
+    parser.add_argument("--out", default="github_issues.json", help="Output JSON path")
     parser.add_argument(
         "--repo",
         default=None,
@@ -63,34 +79,29 @@ def main() -> None:
             )
 
     gh = Github(token)
-    repo = gh.get_repo(f"{owner}/{name}")
-    issues = list(repo.get_issues(state=args.state))[: args.count]
 
-    print(f"Fetching {len(issues)} {args.state} issues from {owner}/{name} …")
+    state_qualifier = "" if args.state == "all" else f" state:{args.state}"
+    query = f"repo:{owner}/{name} is:issue{state_qualifier}"
 
-    rows = []
-    for issue in issues:
-        data = get_issue_data(issue)
-        rows.append(
-            {
-                "number": data["number"],
-                "title": data["title"],
-                "state": data["state"],
-                "author": data["author"],
-                "labels": ", ".join(data["labels"]),
-                "body": data["body"],
-                # comments stored as JSON so the CSV stays flat
-                "comments_json": json.dumps(data["comments"]),
-            }
-        )
-        print(f"  #{data['number']} — {data['title'][:60]}")
+    print(f"Fetching up to {args.count} {args.state} issues from {owner}/{name} ...")
 
-    with open(args.out, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    issues = []
+    for issue_obj in gh.search_issues(query):
+        if len(issues) >= args.count:
+            break
+        issue = fetch_issue(issue_obj)
+        issues.append(issue)
+        print(f"  #{issue['number']} — {issue['title'][:60]}")
 
-    print(f"\nSaved {len(rows)} issues to {args.out}")
+    output = {
+        "repo": {"owner": owner, "name": name},
+        "issues": issues,
+    }
+
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+    print(f"\nSaved {len(issues)} issues to {args.out}")
 
 
 if __name__ == "__main__":

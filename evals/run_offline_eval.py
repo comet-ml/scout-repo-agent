@@ -83,7 +83,7 @@ def make_eval_task(system_prompt: str):
         sim = build(scenario, spec)
         logger.info("scenario=%s target=#%d", scenario, target)
 
-        comment, _trace_id = run_agent(
+        comment, _ = run_agent(
             sim,
             target,
             client=client,

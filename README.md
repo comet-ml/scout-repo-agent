@@ -257,6 +257,17 @@ Trigger it manually from the Actions tab for an immediate sync.
 
 Use the manual trigger workflow in this repo's Actions tab (`Test Scout (Manual)`) to run Scout against a specific issue number before enabling the automatic trigger.
 
+## Evaluation
+
+Scout includes two eval flows for measuring and regressing triage quality:
+
+| Flow | Script | What it measures |
+|---|---|---|
+| **Offline eval** | `evals/run_offline_eval.py` | Bulk quality across real issues; scored by `UsefulnessMetric` |
+| **Test suite** | `evals/run_test_suite.py` | Regression against specific scenarios; LLM-judged per-item assertions |
+
+Both use real GitHub issues fetched via `evals/utils/fetch_github_issues.py` and stored as Opik datasets. See [`evals/README.md`](evals/README.md) for the full setup and usage guide.
+
 ## Local development
 
 The code is an installable package under `src/scout/`. Install it (with dev extras) in editable mode:
@@ -274,20 +285,4 @@ scout-triage
 
 Run the unit tests and linters with `pytest`, `ruff check .`, and `mypy src/scout`.
 
-`.env.example`:
-```
-ANTHROPIC_API_KEY=
-GITHUB_TOKEN=github_pat_...
-SCOUT_ESCALATION_TAG=Escalated request
-SCOUT_GITHUB_REPO_OWNER=owner
-SCOUT_GITHUB_REPO_NAME=name
-ISSUE_NUMBER=123
-OPIK_WORKSPACE=comet-all
-OPIK_API_KEY=
-# Optional: override the system prompt (supports $repo_owner, $repo_name, $escalation_tag)
-# SCOUT_SYSTEM_PROMPT=
-# SCOUT_PROMPT_FILE=
-# Optional: fetch the system prompt from Opik (body used verbatim — no variable substitution)
-# SCOUT_OPIK_PROMPT_NAME=
-# SCOUT_OPIK_PROMPT_VERSION=
-```
+See `.env.example` for all available environment variables.

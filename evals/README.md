@@ -1,36 +1,122 @@
-# Offline evaluation
+# Evals
 
-Scout includes a reproducible eval harness that runs the agent against a snapshot dataset stored in Opik, so you can measure quality changes without hitting live GitHub issues on every run.
+Scout has two evaluation flows, both backed by Opik:
 
-## How it works
-
-Each dataset item uses a `scenario`/`spec`/`target_issue` shape. The `spec` is handed to `providers/scenarios.build()`, which constructs a `GitHubSimulator` — issues and writes are always simulated; file reads can be fully simulated (include a `files` key in the spec) or delegated to real GitHub (omit `files`, requires `GITHUB_TOKEN`).
-
-## Setup
-
-Add these to your `.env` alongside the standard Scout config (see `.env.example` for all variables):
-
-| Var | Default | Description |
+| Flow | Runner | What it measures |
 |---|---|---|
-| `SCOUT_GITHUB_DATASET_NAME` | `scout-triage-inputs` | Opik dataset of real GitHub issues |
-| `SCOUT_STARTER_DATASET_NAME` | `scout-starter-scenarios` | Opik dataset of synthetic starter scenarios |
-| `SCOUT_EVAL_OPIK_PROJECT` | `scout-eval` | Opik project for eval traces |
-| `SCOUT_EXPERIMENT_NAME` | `scout-offline-eval` | Experiment name prefix (timestamp appended per run) |
-| `SCOUT_GITHUB_REPO_OWNER` | — | Required for real-GitHub file mode |
-| `SCOUT_GITHUB_REPO_NAME` | — | Required for real-GitHub file mode |
+| **Offline eval** | `evals/run_offline_eval.py` | Bulk quality across many real issues; scored by `UsefulnessMetric` (Claude Sonnet) |
+| **Test suite** | `evals/run_test_suite.py` | Regression against specific scenarios; LLM-judged per-item assertions (Claude Haiku) |
 
-## Datasets
+---
 
-Two separate Opik datasets are used:
+## Prerequisites
 
-| Dataset | Contents | Seeded from |
+The following must be set in your `.env` before running anything (see `.env.example` for all variables):
+
+```bash
+ANTHROPIC_API_KEY=       # required — Scout agent and LLM judge both use Claude
+GITHUB_TOKEN=            # required — fetching issues and real-GitHub file mode during evals
+OPIK_API_KEY=            # required — logging traces and reading datasets
+OPIK_WORKSPACE=          # required — your Opik workspace name
+SCOUT_GITHUB_REPO_OWNER= # required — repo to fetch issues from
+SCOUT_GITHUB_REPO_NAME=  # required — repo to fetch issues from
+SCOUT_EVAL_OPIK_PROJECT= # Optional — defaults to scout:{SCOUT_GITHUB_REPO_OWNER}/{SCOUT_GITHUB_REPO_NAME}
+```
+
+---
+
+## End-to-end flow
+
+Both eval flows share the same pipeline:
+
+```
+fetch_github_issues.py  →  seed_dataset.py / seed_test_suite.py  →  run_offline_eval.py / run_test_suite.py
+       (fetch)                        (seed Opik)                            (run)
+```
+
+### Step 1 — Fetch issues from GitHub
+
+`evals/utils/fetch_github_issues.py` fetches real issues from any GitHub repo using the search API with `is:issue` (pull requests excluded). Output is a JSON file consumed by the seed scripts.
+
+```bash
+python evals/utils/fetch_github_issues.py --count 30 --state all --out github_issues.json
+```
+
+Options:
+
+| Flag | Default | Description |
 |---|---|---|
-| `scout-triage-inputs` | Real issues from the GitHub repo | `fetch_github_issues.py` → `seed_dataset.py --from-github` |
-| `scout-starter-scenarios` | Synthetic fully-simulated scenarios | `seed_dataset.py --from-starter` |
+| `--repo owner/name` | env vars | Override the target repo |
+| `--count N` | `10` | Number of issues to fetch |
+| `--state open\|closed\|all` | `open` | Issue state filter |
+| `--out FILE` | `github_issues.json` | Output path |
+
+> JSON output files are gitignored — don't commit them.
+
+### Step 2 — Seed Opik
+
+Choose the offline dataset, the test suite, or both.
+
+**Offline eval datasets** (two separate datasets, one command):
+
+```bash
+python evals/utils/seed_dataset.py --from-github github_issues.json --from-starter
+```
+
+| Flag | Seeds dataset | Mode |
+|---|---|---|
+| `--from-github FILE` | `scout-triage-inputs` | Real issues — file reads hit live GitHub during the eval |
+| `--from-starter` | `scout-starter-scenarios` | Synthetic, fully simulated — no network required during eval |
+
+**Test suite** (`scout-triage-regression`):
+
+```bash
+python evals/utils/seed_test_suite.py --from-github github_issues.json --from-starter
+```
+
+| Flag | Items seeded | Assertions |
+|---|---|---|
+| `--from-github FILE` | Real GitHub issues | None — add via Opik UI after reviewing Scout's output |
+| `--from-starter` | Synthetic starter scenarios | Predefined per-item assertions included |
+
+All seed scripts create the dataset/suite if it doesn't exist, or append to an existing one. Delete in the Opik UI before re-seeding to start clean.
+
+### Step 3 — Run
+
+**Offline eval** — runs against `SCOUT_GITHUB_DATASET_NAME` (default: `scout-triage-inputs`):
+
+```bash
+python evals/run_offline_eval.py
+```
+
+Each run gets a unique timestamped experiment name. Results and traces are logged to `SCOUT_EVAL_OPIK_PROJECT`.
+
+**Test suite** — runs against the hardcoded `scout-triage-regression` suite:
+
+```bash
+python evals/run_test_suite.py
+```
+
+Pass rate is printed on completion and visible in the Opik dashboard.
+
+---
+
+## Simulation modes
+
+Both flows use a `GitHubSimulator` that intercepts the agent's GitHub tool calls. The mode depends on whether `files` is present in the spec:
+
+| Mode | `files` in spec | File reads | Issue search | Network needed |
+|---|---|---|---|---|
+| **Simulated** | Yes (or using starters) | From spec | From spec | No |
+| **Real-GitHub** | No (fetched issues) | Live GitHub API | From spec (target only) | Yes — `GITHUB_TOKEN` |
+
+> Real-GitHub mode fetches file contents at eval time, not at seed time. `GITHUB_TOKEN` must be valid when running the eval, not just when seeding.
+
+---
 
 ## Dataset item format
 
-Every item in an Opik dataset must follow this shape:
+Both flows consume items in this shape:
 
 ```json
 {
@@ -39,8 +125,6 @@ Every item in an Opik dataset must follow this shape:
     "spec": {
       "owner": "my-org",
       "name": "my-repo",
-      "readme": "...",
-      "files": {"src/foo.py": "..."},
       "issues": [
         {
           "number": 42,
@@ -58,56 +142,4 @@ Every item in an Opik dataset must follow this shape:
 }
 ```
 
-Omit `files` (and `readme`) inside `spec` to use real-GitHub mode — `list_directory`, `get_file_contents`, and `fetch_readme` will be fetched from the live repo via `GITHUB_TOKEN`.
-
-## Step 1 — Fetch issues from GitHub
-
-`evals/utils/fetch_github_issues.py` fetches real issues from any GitHub repo and saves them as JSON. It uses the GitHub search API with `is:issue` to exclude pull requests.
-
-```bash
-python evals/utils/fetch_github_issues.py --count 30 --state all --out github_issues.json
-```
-
-Options:
-- `--repo owner/name` — override the repo (defaults to `SCOUT_GITHUB_REPO_OWNER`/`SCOUT_GITHUB_REPO_NAME`)
-- `--count N` — number of issues to fetch (default: 10)
-- `--state open|closed|all` — issue state filter (default: open)
-- `--out FILE` — output path (default: `github_issues.json`)
-
-> JSON output files are gitignored — don't commit them.
-
-## Step 2 — Seed the datasets
-
-`evals/utils/seed_dataset.py` inserts items into Opik datasets. The two sources seed separate datasets:
-
-**Real GitHub issues** → `scout-triage-inputs`:
-
-```bash
-python evals/utils/seed_dataset.py --from-github github_issues.json
-```
-
-**Synthetic starter scenarios** → `scout-starter-scenarios`:
-
-```bash
-python evals/utils/seed_dataset.py --from-starter
-```
-
-**Both at once:**
-
-```bash
-python evals/utils/seed_dataset.py --from-github github_issues.json --from-starter
-```
-
-Each script creates the dataset if it doesn't exist, or appends to an existing one. To start clean, delete the dataset in the Opik UI before re-seeding.
-
-## Step 3 — Run the eval
-
-```bash
-python evals/run_offline_eval.py
-```
-
-By default this runs against `scout-triage-inputs`. Set `SCOUT_GITHUB_DATASET_NAME` in `.env` to target a different dataset.
-
-Results and traces are logged to Opik under the project set in `SCOUT_EVAL_OPIK_PROJECT`. Each run gets a unique timestamped experiment name so results are easy to compare across runs.
-
-The task returns `output` (the comment Scout posted), `final_labels`, `applied_labels`, and `search_queries`, so scoring metrics can reference side-effect state, not just the comment text.
+Include `"files": {"src/foo.py": "..."}` and `"readme": "..."` in `spec` to use fully simulated mode. Omit them for real-GitHub mode.

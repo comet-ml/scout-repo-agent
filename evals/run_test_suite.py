@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run Scout against an Opik Test Suite of triage scenarios.
 
-Each dataset item carries:
+Each test suite item carries:
     - "scenario": a registered builder name (default: "default")
     - "spec": JSON consumed by the builder to populate a GitHubSimulator
     - "target_issue": the issue number Scout should triage
@@ -11,50 +11,54 @@ returns the comment text plus side-effect info so Opik's LLM-judged
 assertions can grade both the output and what Scout did.
 
 Env vars (in addition to the triage module's normal config):
-    SCOUT_TEST_SUITE_NAME      — Opik Test Suite name (required)
+    SCOUT_EVAL_OPIK_PROJECT    — Opik project for eval traces (default: scout-eval)
     SCOUT_EXPERIMENT_NAME      — Experiment-name prefix; a YYYY-MM-DD-HH-MM-SS
                                  timestamp is appended so each run is unique
                                  (default: "scout-eval")
-    SCOUT_EVAL_OPIK_PROJECT    — Opik project for eval traces
-                                 (default: "scout-eval", keeps prod project clean)
-
-Note: the triage module validates GITHUB_TOKEN at import time. The simulator doesn't
-use it, so any non-empty value (e.g. "unused") is fine for eval runs.
 """
 from __future__ import annotations
 
 import logging
 import os
+import sys
+
+os.environ.setdefault("ISSUE_NUMBER", "1")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from datetime import datetime
 
 import opik
+from dotenv import load_dotenv
 
-from scout.agent import make_client, run_agent
-from scout.providers.scenarios import build
-from scout.triage import (
+load_dotenv(override=True)
+
+from scout.agent import make_client, run_agent  # noqa: E402
+from scout.providers.scenarios import build  # noqa: E402
+from scout.triage import (  # noqa: E402
     ANTHROPIC_API_KEY,
     MAX_TOKENS,
     MODEL,
     SCOUT_ESCALATION_TAG,
+    SCOUT_OPIK_PROMPT_NAME,
     load_system_prompt,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-
-EVAL_OPIK_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT", "scout-eval")
-TEST_SUITE_NAME = os.environ.get("SCOUT_TEST_SUITE_NAME", "scout-triage-regression")
+SUITE_NAME = "scout-triage-regression"
+_repo_owner = os.environ.get("SCOUT_GITHUB_REPO_OWNER", "")
+_repo_name = os.environ.get("SCOUT_GITHUB_REPO_NAME", "")
+_default_project = f"scout:{_repo_owner}/{_repo_name}" if _repo_owner and _repo_name else "scout-eval"
+EVAL_OPIK_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT") or _default_project
 EXPERIMENT_NAME_PREFIX = os.environ.get("SCOUT_EXPERIMENT_NAME", "scout-eval")
 
 
 def _experiment_name() -> str:
-    """`{prefix}-YYYY-MM-DD-HH-MM-SS` — unique per second, sortable in the UI."""
     return f"{EXPERIMENT_NAME_PREFIX}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
 
 def make_task():
-    """Build the `task(item)` callable that `opik.run_tests` will invoke per item."""
     client = make_client(ANTHROPIC_API_KEY, opik_project=EVAL_OPIK_PROJECT)
     system_prompt = load_system_prompt()
 
@@ -67,7 +71,7 @@ def make_task():
         sim = build(scenario, spec)
         logger.info("scenario=%s target=#%d", scenario, target)
 
-        comment, _trace_id = run_agent(
+        comment, _ = run_agent(
             sim,
             target,
             client=client,
@@ -81,13 +85,12 @@ def make_task():
         )
 
         final_issue = sim.issue(target)
-        applied = [lbl for op, _, lbl in (c for c in sim.calls if len(c) == 3 and c[0] == "apply_label")]
-        searches = [q for op, q in (c for c in sim.calls if len(c) == 2 and c[0] == "search_issues")]
+        applied = [c[2] for c in sim.calls if len(c) == 3 and c[0] == "apply_label"]
+        searches = [c[1] for c in sim.calls if len(c) == 2 and c[0] == "search_issues"]
 
         return {
             "input": {"target_issue": target, "issues": spec.get("issues", [])},
             "output": comment,
-            # State after the run — assertions can judge real outcomes
             "final_labels": final_issue["labels"],
             "applied_labels": applied,
             "search_queries": searches,
@@ -97,20 +100,26 @@ def make_task():
 
 
 def main() -> None:
-    client = opik.Opik()
-    suite = client.get_test_suite(TEST_SUITE_NAME)
+    opik_client = opik.Opik()
+    suite = opik_client.get_test_suite(SUITE_NAME)
+    prompt_obj = opik_client.get_chat_prompt(name=SCOUT_OPIK_PROMPT_NAME)
+
     experiment_name = _experiment_name()
-    logger.info("Experiment: %s", experiment_name)
+    logger.info("Suite: %s  |  Experiment: %s", SUITE_NAME, experiment_name)
+
     result = opik.run_tests(
         test_suite=suite,
         task=make_task(),
         experiment_name=experiment_name,
+        experiment_config={"model": MODEL, "max_tokens": MAX_TOKENS, "prompt_name": SCOUT_OPIK_PROMPT_NAME},
+        prompts=[prompt_obj] if prompt_obj else [],
+        model="claude-haiku-4-5-20251001",
     )
     pass_rate = getattr(result, "pass_rate", None)
     if pass_rate is not None:
-        logger.info("Pass rate: %s", pass_rate)
+        logger.info("Pass rate: %.2f", pass_rate)
     else:
-        logger.info("Done — see Opik UI for results.")
+        logger.info("Done — view results in the Opik UI under project %r.", EVAL_OPIK_PROJECT)
 
 
 if __name__ == "__main__":

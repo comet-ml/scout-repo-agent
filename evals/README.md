@@ -18,9 +18,10 @@ ANTHROPIC_API_KEY=       # required — Scout agent and LLM judge both use Claud
 GITHUB_TOKEN=            # required — fetching issues and real-GitHub file mode during evals
 OPIK_API_KEY=            # required — logging traces and reading datasets
 OPIK_WORKSPACE=          # required — your Opik workspace name
+OPIK_ENVIRONMENT=dev     # dev (local + offline evals), test (test suite — auto-set), staging (UAT), prod (GitHub Action)
 SCOUT_GITHUB_REPO_OWNER= # required — repo to fetch issues from
 SCOUT_GITHUB_REPO_NAME=  # required — repo to fetch issues from
-SCOUT_EVAL_OPIK_PROJECT= # Optional — defaults to scout:{SCOUT_GITHUB_REPO_OWNER}/{SCOUT_GITHUB_REPO_NAME}
+SCOUT_EVAL_OPIK_PROJECT= # optional — defaults to scout:{SCOUT_GITHUB_REPO_OWNER}/{SCOUT_GITHUB_REPO_NAME}
 ```
 
 ---
@@ -98,6 +99,8 @@ python evals/run_test_suite.py
 ```
 
 Pass rate is printed on completion and visible in the Opik dashboard.
+
+> **Environment convention:** `run_test_suite.py` automatically defaults to `OPIK_ENVIRONMENT=test` — no manual setup needed. Offline eval runs use `dev` from `.env`. Override either by setting `OPIK_ENVIRONMENT` in the shell before running (e.g. `OPIK_ENVIRONMENT=staging` for UAT). The GitHub Action sets `prod`.
 
 ---
 

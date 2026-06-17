@@ -281,7 +281,7 @@ def load_system_prompt() -> str:
     try:
         chat = client.get_chat_prompt(
             name=SCOUT_OPIK_PROMPT_NAME,
-            version=version,
+            commit=version,
             project_name=OPIK_PROJECT,
         )
     except PromptTemplateStructureMismatch:

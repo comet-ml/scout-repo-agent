@@ -33,7 +33,7 @@ import sys
 from dotenv import load_dotenv
 from github import Github
 
-load_dotenv(override=True)
+load_dotenv()
 
 
 def fetch_issue(issue_obj) -> dict:

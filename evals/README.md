@@ -18,9 +18,10 @@ ANTHROPIC_API_KEY=       # required — Scout agent and LLM judge both use Claud
 GITHUB_TOKEN=            # required — fetching issues and real-GitHub file mode during evals
 OPIK_API_KEY=            # required — logging traces and reading datasets
 OPIK_WORKSPACE=          # required — your Opik workspace name
+OPIK_ENVIRONMENT=test    # recommended — tags eval traces as "test" in the Opik UI (use "dev" for local triage)
 SCOUT_GITHUB_REPO_OWNER= # required — repo to fetch issues from
 SCOUT_GITHUB_REPO_NAME=  # required — repo to fetch issues from
-SCOUT_EVAL_OPIK_PROJECT= # Optional — defaults to scout:{SCOUT_GITHUB_REPO_OWNER}/{SCOUT_GITHUB_REPO_NAME}
+SCOUT_EVAL_OPIK_PROJECT= # optional — defaults to scout:{SCOUT_GITHUB_REPO_OWNER}/{SCOUT_GITHUB_REPO_NAME}
 ```
 
 ---
@@ -86,7 +87,7 @@ All seed scripts create the dataset/suite if it doesn't exist, or append to an e
 **Offline eval** — runs against `SCOUT_GITHUB_DATASET_NAME` (default: `scout-triage-inputs`):
 
 ```bash
-python evals/run_offline_eval.py
+OPIK_ENVIRONMENT=test python evals/run_offline_eval.py
 ```
 
 Each run gets a unique timestamped experiment name. Results and traces are logged to `SCOUT_EVAL_OPIK_PROJECT`.
@@ -94,10 +95,12 @@ Each run gets a unique timestamped experiment name. Results and traces are logge
 **Test suite** — runs against the hardcoded `scout-triage-regression` suite:
 
 ```bash
-python evals/run_test_suite.py
+OPIK_ENVIRONMENT=test python evals/run_test_suite.py
 ```
 
 Pass rate is printed on completion and visible in the Opik dashboard.
+
+> **Environment convention:** set `OPIK_ENVIRONMENT=test` for all eval runs so traces are separated from local development (`dev`) and production (`prod`) in the Opik UI. If `OPIK_ENVIRONMENT=test` is already in your `.env`, no inline override is needed.
 
 ---
 

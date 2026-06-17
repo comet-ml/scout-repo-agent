@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from github import GithubException
 
-from evals.starter_scenarios import STARTER_SCENARIOS
+from evals.utils.starter_scenarios import STARTER_SCENARIOS
 from scout import agent
 from scout import triage as scout
 from scout.providers.github import GitHubProvider

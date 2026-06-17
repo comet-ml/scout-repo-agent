@@ -53,7 +53,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATASET_NAME = os.environ.get("SCOUT_GITHUB_DATASET_NAME", "scout-triage-inputs")
-EVAL_OPIK_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT", "scout-eval")
+_repo_owner = os.environ.get("SCOUT_GITHUB_REPO_OWNER", "")
+_repo_name = os.environ.get("SCOUT_GITHUB_REPO_NAME", "")
+_default_project = f"scout:{_repo_owner}/{_repo_name}" if _repo_owner and _repo_name else "scout-eval"
+EVAL_OPIK_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT") or _default_project
 EXPERIMENT_NAME_PREFIX = os.environ.get("SCOUT_EXPERIMENT_NAME", "scout-offline-eval")
 
 

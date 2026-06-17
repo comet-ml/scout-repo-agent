@@ -1,11 +1,12 @@
 """Starter scenarios for the Scout triage Test Suite.
 
 Each item is a TestSuiteItem dict ready to hand to `TestSuite.insert(...)`. The
-`data` field is what evals/run_eval.py's task() consumes — `scenario` picks the
-builder, `spec` populates the GitHubSimulator, `target_issue` is the issue
+`data` field is what evals/run_test_suite.py's task() consumes — `scenario` picks
+the builder, `spec` populates the GitHubSimulator, `target_issue` is the issue
 Scout triages this run.
 
-To add a scenario, append to STARTER_SCENARIOS and re-run seed_test_suite.py.
+To add a scenario, append to STARTER_SCENARIOS and re-run
+evals/utils/seed_test_suite.py --from-starter.
 """
 from __future__ import annotations
 

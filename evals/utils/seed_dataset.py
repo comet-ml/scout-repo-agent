@@ -35,7 +35,10 @@ load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATASET_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT", "scout-eval")
+_repo_owner = os.environ.get("SCOUT_GITHUB_REPO_OWNER", "")
+_repo_name = os.environ.get("SCOUT_GITHUB_REPO_NAME", "")
+_default_project = f"scout:{_repo_owner}/{_repo_name}" if _repo_owner and _repo_name else "scout-eval"
+DATASET_PROJECT = os.environ.get("SCOUT_EVAL_OPIK_PROJECT") or _default_project
 GITHUB_DATASET_NAME = os.environ.get("SCOUT_GITHUB_DATASET_NAME", "scout-triage-inputs")
 STARTER_DATASET_NAME = os.environ.get("SCOUT_STARTER_DATASET_NAME", "scout-starter-scenarios")
 
@@ -67,7 +70,7 @@ def items_from_github(path: str) -> tuple[list[dict], str, str]:
 
 
 def items_from_starter() -> list[dict]:
-    from evals.starter_scenarios import STARTER_SCENARIOS
+    from evals.utils.starter_scenarios import STARTER_SCENARIOS
     items = [{"description": s["description"], "data": s["data"]} for s in STARTER_SCENARIOS]
     logger.info("Loaded %d starter scenario items", len(items))
     return items

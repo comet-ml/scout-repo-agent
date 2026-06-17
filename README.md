@@ -94,7 +94,7 @@ The GitHub App must have these permissions:
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
 | `OPIK_API_KEY` | **yes** | Opik API key. Opik is required — Scout sources its system prompt from Opik and traces every run there. |
 | `OPIK_WORKSPACE` | **yes** | Opik workspace name |
-| `OPIK_ENVIRONMENT` | no | Tags traces by environment in the Opik UI. Convention: `prod` (GitHub Action), `dev` (local), `test` (eval runs). |
+| `OPIK_ENVIRONMENT` | no | Tags traces by environment in the Opik UI. Convention: `dev` (local), `test` (test suite — set automatically), `staging` (UAT), `prod` (GitHub Action). |
 | `SCOUT_FEEDBACK_SINCE_DAYS` | no | Feedback sync only: how many days back to scan issues for 👍/👎 reactions (default: `7`) |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
 | `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |

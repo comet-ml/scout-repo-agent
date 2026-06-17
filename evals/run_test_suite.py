@@ -30,7 +30,8 @@ from datetime import datetime
 import opik
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+os.environ.setdefault("OPIK_ENVIRONMENT", "test")
+load_dotenv()
 
 from scout.agent import make_client, run_agent  # noqa: E402
 from scout.providers.scenarios import build  # noqa: E402

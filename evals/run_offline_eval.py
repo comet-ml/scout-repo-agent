@@ -36,7 +36,7 @@ import opik
 from opik.evaluation.metrics import Usefulness
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv()
 
 from scout.agent import make_client, run_agent  # noqa: E402
 from scout.providers.scenarios import build  # noqa: E402

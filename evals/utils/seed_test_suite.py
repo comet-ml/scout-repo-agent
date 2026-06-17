@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import opik
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def items_from_github(path: str) -> tuple[list[dict], str, str]:
     return items, owner, name
 
 
-def items_from_starter() -> list[dict]:
+def items_from_starter() -> tuple[list[dict], list[str], dict]:
     from evals.utils.starter_scenarios import GLOBAL_ASSERTIONS, GLOBAL_EXECUTION_POLICY, STARTER_SCENARIOS
     items = []
     for s in STARTER_SCENARIOS:
@@ -91,11 +91,11 @@ def items_from_starter() -> list[dict]:
 
 def _get_or_create_suite(client: opik.Opik, global_assertions, global_execution_policy):
     try:
-    	suite = client.get_test_suite(name=SUITE_NAME, project_name=SUITE_PROJECT)
-    	logger.info("Found existing test suite %r — reusing.", SUITE_NAME)
-    	return suite
+        suite = client.get_test_suite(name=SUITE_NAME, project_name=SUITE_PROJECT)
+        logger.info("Found existing test suite %r — reusing.", SUITE_NAME)
+        return suite
     except Exception as e:
-    	logger.info("Test suite %r not found (%s) — creating it.", SUITE_NAME, type(e).__name__)
+        logger.info("Test suite %r not found (%s) — creating it.", SUITE_NAME, type(e).__name__)
 
     return client.create_test_suite(
         name=SUITE_NAME,
@@ -131,8 +131,8 @@ def main() -> None:
     all_items: list[dict] = []
 
     if args.from_github:
-        items, _owner, _name = items_from_github(args.from_github)
-        all_items.extend(items)
+        github_items, *_ = items_from_github(args.from_github)
+        all_items.extend(github_items)
 
     if args.from_starter:
         items, global_assertions, global_execution_policy = items_from_starter()

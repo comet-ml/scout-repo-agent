@@ -280,14 +280,18 @@ def load_system_prompt() -> str:
 
     # Priority 1: explicit version pin — escape hatch for hotfixes or A/B testing.
     # Priority 2: environment-driven — Opik maps OPIK_ENVIRONMENT → prompt version.
-    # Priority 3: latest — neither set, use the most recent published version.
+    # Priority 3: latest — neither set, omit both kwargs so the SDK returns the
+    #             most recent published version without any filtering.
+    environment = os.environ.get("OPIK_ENVIRONMENT") or None
     if SCOUT_OPIK_PROMPT_VERSION:
         fetch_kwargs: dict = {"version": SCOUT_OPIK_PROMPT_VERSION}
         fetch_label = f"version={SCOUT_OPIK_PROMPT_VERSION!r}"
-    else:
-        environment = os.environ.get("OPIK_ENVIRONMENT") or None
+    elif environment:
         fetch_kwargs = {"environment": environment}
-        fetch_label = f"environment={environment!r}" if environment else "latest"
+        fetch_label = f"environment={environment!r}"
+    else:
+        fetch_kwargs = {}
+        fetch_label = "latest"
 
     try:
         chat = client.get_chat_prompt(

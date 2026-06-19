@@ -212,7 +212,6 @@ class TestLoadSystemPrompt:
         assert result == "latest prompt"
         client.get_chat_prompt.assert_called_once_with(
             name="scout-system-prompt",
-            environment=None,
             project_name="scout:test-owner/test-repo",
         )
 

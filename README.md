@@ -94,7 +94,7 @@ The GitHub App must have these permissions:
 | `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
 | `OPIK_API_KEY` | **yes** | Opik API key. Opik is required — Scout sources its system prompt from Opik and traces every run there. |
 | `OPIK_WORKSPACE` | **yes** | Opik workspace name |
-| `OPIK_ENVIRONMENT` | no | Tags traces by environment in the Opik UI. Convention: `dev` (local), `test` (test suite — set automatically), `staging` (UAT), `prod` (GitHub Action). |
+| `OPIK_ENVIRONMENT` | no | Tags traces by environment in the Opik UI **and** determines which prompt version Scout fetches (see [Prompt version resolution](#prompt-version-resolution)). Convention: `dev` (local), `test` (test suite — set automatically), `staging` (UAT), `prod` (GitHub Action). |
 | `SCOUT_FEEDBACK_SINCE_DAYS` | no | Feedback sync only: how many days back to scan issues for 👍/👎 reactions (default: `7`) |
 | `ISSUE_NUMBER` | no | Override issue number (auto-detected from event payload) |
 | `SCOUT_MODEL` | no | Anthropic model ID (default: `claude-sonnet-4-6`) |
@@ -102,7 +102,7 @@ The GitHub App must have these permissions:
 | `SCOUT_SYSTEM_PROMPT` | no | Override the system prompt inline. Supports `$repo_owner`, `$repo_name`, `$escalation_tag` placeholders. |
 | `SCOUT_PROMPT_FILE` | no | Path to a file containing the system prompt (same placeholders supported). Takes effect only when `SCOUT_SYSTEM_PROMPT` is not set. |
 | `SCOUT_OPIK_PROMPT_NAME` | no | Name of the Opik-managed prompt Scout uses as its system prompt (default: `scout-system-prompt`). If no prompt by this name exists in the project, Scout auto-creates it from the built-in base prompt on first run. The Opik body is then used verbatim — no variable substitution — so edit it in the Opik UI to change behavior. **For the GitHub Action, set via the `opik_prompt_name` action input rather than `env:` — see the Opik example below.** |
-| `SCOUT_OPIK_PROMPT_VERSION` | no | Pin a specific Opik prompt version (e.g. `v3`). Defaults to the latest version. **For the GitHub Action, set via the `opik_prompt_version` action input.** |
+| `SCOUT_OPIK_PROMPT_VERSION` | no | Explicit prompt version override (e.g. `v3`). Takes priority over `OPIK_ENVIRONMENT` — use for hotfixes or A/B testing. Omit to let environment-driven resolution apply. **For the GitHub Action, set via the `opik_prompt_version` action input.** |
 
 ## Customizing the system prompt
 
@@ -203,6 +203,16 @@ Scout's system prompt lives in [Opik](https://www.comet.com/opik) as a versioned
 **Seed precedence (first run only):** `SCOUT_SYSTEM_PROMPT` > `SCOUT_PROMPT_FILE` > built-in default. Once the Opik prompt exists, Opik is the source of truth. If a fetch fails transiently (e.g. network error), Scout logs a warning and falls back to the local base prompt for that run so triage still completes.
 
 **Iterating:** edit the prompt in Opik to publish a new version. Without `SCOUT_OPIK_PROMPT_VERSION` set, the next Scout run picks it up automatically; with a pinned version, the run continues to use that version until you bump the value.
+
+### Prompt version resolution
+
+Scout resolves the prompt version in priority order:
+
+1. **`SCOUT_OPIK_PROMPT_VERSION` set** — fetches that exact version (`v3`, `v5`, etc.). Use for hotfixes or A/B testing where you need to bypass environment-driven selection.
+2. **`OPIK_ENVIRONMENT` set** — fetches the version linked to that environment in the Opik UI. Configure the mapping once (`prod` → `v3`, `staging` → `v2`, `dev` → `v1`) and Scout picks the right prompt automatically wherever it runs. If the environment has no linked version, Scout raises an error rather than silently falling back.
+3. **Neither set** — fetches the latest published version.
+
+This means `OPIK_ENVIRONMENT` does double duty: it tags traces for observability *and* determines which prompt version the agent uses — keeping the two always in sync.
 
 ## Response feedback
 

@@ -277,12 +277,27 @@ def load_system_prompt() -> str:
     verbatim; edit it in the Opik UI to change Scout's behavior.
     """
     client = opik.Opik()
-    version = SCOUT_OPIK_PROMPT_VERSION or None
+
+    # Priority 1: explicit version pin — escape hatch for hotfixes or A/B testing.
+    # Priority 2: environment-driven — Opik maps OPIK_ENVIRONMENT → prompt version.
+    # Priority 3: latest — neither set, omit both kwargs so the SDK returns the
+    #             most recent published version without any filtering.
+    environment = os.environ.get("OPIK_ENVIRONMENT") or None
+    if SCOUT_OPIK_PROMPT_VERSION:
+        fetch_kwargs: dict = {"version": SCOUT_OPIK_PROMPT_VERSION}
+        fetch_label = f"version={SCOUT_OPIK_PROMPT_VERSION!r}"
+    elif environment:
+        fetch_kwargs = {"environment": environment}
+        fetch_label = f"environment={environment!r}"
+    else:
+        fetch_kwargs = {}
+        fetch_label = "latest"
+
     try:
         chat = client.get_chat_prompt(
             name=SCOUT_OPIK_PROMPT_NAME,
-            commit=version,
             project_name=OPIK_PROJECT,
+            **fetch_kwargs,
         )
     except PromptTemplateStructureMismatch:
         # The name exists but points at a text prompt — migrate it to chat.
@@ -297,15 +312,26 @@ def load_system_prompt() -> str:
             return _base_system_prompt()
     except Exception as e:
         logger.warning(
-            "Failed to fetch Opik chat prompt %r (version=%r): %s — using local base prompt",
-            SCOUT_OPIK_PROMPT_NAME, SCOUT_OPIK_PROMPT_VERSION or "latest", e,
+            "Failed to fetch Opik chat prompt %r (%s): %s — using local base prompt",
+            SCOUT_OPIK_PROMPT_NAME, fetch_label, e,
         )
         return _base_system_prompt()
 
     if chat is not None:
         return _text_from_chat_prompt(chat)
 
-    # First run for this project: seed Opik from the local base prompt.
+    # Environment-driven mode: None means the environment has no linked prompt
+    # version in Opik — this is a misconfiguration, not a first-run scenario.
+    if fetch_kwargs.get("environment"):
+        raise RuntimeError(
+            f"Opik prompt {SCOUT_OPIK_PROMPT_NAME!r} has no version linked to "
+            f"environment {fetch_kwargs['environment']!r}. "
+            "Link a prompt version to this environment in the Opik UI, "
+            "or set SCOUT_OPIK_PROMPT_VERSION to pin a version explicitly."
+        )
+
+    # First run for this project (no environment, no version): seed Opik from
+    # the local base prompt so subsequent runs fetch from Opik.
     base = _base_system_prompt()
     logger.info(
         "Opik chat prompt %r not found in project %r — creating it from the base prompt",

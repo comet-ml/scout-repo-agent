@@ -118,7 +118,7 @@ class TestLoadSystemPrompt:
     local base prompt (env override > file > built-in default) only seeds Opik
     on first run, and a legacy text prompt is migrated to a chat prompt."""
 
-    def _call(self, client, **overrides):
+    def _call(self, client, *, opik_environment="", **overrides):
         defaults = dict(
             SCOUT_SYSTEM_PROMPT_OVERRIDE="",
             SCOUT_PROMPT_FILE="",
@@ -130,9 +130,13 @@ class TestLoadSystemPrompt:
             SCOUT_ESCALATION_TAG="Escalated request",
         )
         defaults.update(overrides)
-        with patch.multiple("scout.triage", **defaults):
-            with patch("scout.triage.opik.Opik", return_value=client):
-                return scout.load_system_prompt()
+        # Always explicitly control OPIK_ENVIRONMENT so shell env vars don't
+        # affect test behaviour. Empty string resolves to None in the code
+        # (os.environ.get(...) or None), meaning "fetch latest".
+        with patch.dict(os.environ, {"OPIK_ENVIRONMENT": opik_environment}):
+            with patch.multiple("scout.triage", **defaults):
+                with patch("scout.triage.opik.Opik", return_value=client):
+                    return scout.load_system_prompt()
 
     @staticmethod
     def _chat_prompt(text):
@@ -174,6 +178,40 @@ class TestLoadSystemPrompt:
         client.get_chat_prompt.assert_called_once_with(
             name="scout-system-prompt",
             version="v3",
+            project_name="scout:test-owner/test-repo",
+        )
+
+    def test_environment_driven_fetch(self):
+        client = self._client(get_return=self._chat_prompt("env prompt"))
+        result = self._call(client, opik_environment="dev")
+        assert result == "env prompt"
+        client.get_chat_prompt.assert_called_once_with(
+            name="scout-system-prompt",
+            environment="dev",
+            project_name="scout:test-owner/test-repo",
+        )
+
+    def test_explicit_version_overrides_environment(self):
+        client = self._client(get_return=self._chat_prompt("pinned"))
+        self._call(client, SCOUT_OPIK_PROMPT_VERSION="v3", opik_environment="prod")
+        client.get_chat_prompt.assert_called_once_with(
+            name="scout-system-prompt",
+            version="v3",
+            project_name="scout:test-owner/test-repo",
+        )
+
+    def test_unlinked_environment_raises(self):
+        client = self._client(get_return=None)
+        with pytest.raises(RuntimeError, match="no version linked to environment 'staging'"):
+            self._call(client, opik_environment="staging")
+        client.create_chat_prompt.assert_not_called()
+
+    def test_latest_when_neither_set(self):
+        client = self._client(get_return=self._chat_prompt("latest prompt"))
+        result = self._call(client, opik_environment="")
+        assert result == "latest prompt"
+        client.get_chat_prompt.assert_called_once_with(
+            name="scout-system-prompt",
             project_name="scout:test-owner/test-repo",
         )
 

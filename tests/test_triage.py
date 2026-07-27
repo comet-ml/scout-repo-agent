@@ -796,6 +796,57 @@ class TestMakeTools:
         assert "Escalated request" in self.sim.issue(42)["labels"]
 
 
+class TestToolErrorInfo:
+    """Tools return failures as strings rather than raising, so make_tools has
+    to flag the Opik span explicitly for it to be recorded as an error."""
+
+    def setup_method(self):
+        self.sim = GitHubSimulator().add_file("src/a.py", "code")
+        self.recorded = []
+
+    def _tools(self, monkeypatch):
+        monkeypatch.setattr(
+            agent.opik_context,
+            "update_current_span",
+            lambda **kw: self.recorded.append(kw),
+        )
+        monkeypatch.setattr(agent.opik, "track", lambda **kw: (lambda fn: fn))
+        return agent.make_tools(self.sim, issue_number=42, opik_project="proj")
+
+    def test_missing_file_sets_error_info(self, monkeypatch):
+        tools = self._tools(monkeypatch)
+        result = tools["get_file_contents"]("nope.py")
+        assert "Not Found" in result
+        (call,) = self.recorded
+        assert call["error_info"]["exception_type"] == "FileReadError"
+        assert "Not Found" in call["error_info"]["message"]
+
+    def test_path_traversal_sets_error_info(self, monkeypatch):
+        tools = self._tools(monkeypatch)
+        tools["get_file_contents"]("../etc/passwd")
+        assert self.recorded[0]["error_info"]["exception_type"] == "PathTraversalError"
+
+    def test_label_failure_sets_error_info(self, monkeypatch):
+        tools = self._tools(monkeypatch)
+        tools["apply_label"]("bug")  # issue 42 does not exist in this simulator
+        assert self.recorded[0]["error_info"]["exception_type"] == "LabelError"
+
+    def test_successful_read_leaves_span_clean(self, monkeypatch):
+        tools = self._tools(monkeypatch)
+        assert tools["get_file_contents"]("src/a.py") == "code"
+        assert self.recorded == []
+
+    def test_no_opik_project_skips_span_update(self, monkeypatch):
+        monkeypatch.setattr(
+            agent.opik_context,
+            "update_current_span",
+            lambda **kw: self.recorded.append(kw),
+        )
+        tools = agent.make_tools(self.sim, issue_number=42)
+        assert "Not Found" in tools["get_file_contents"]("nope.py")
+        assert self.recorded == []
+
+
 # ---------------------------------------------------------------------------
 # Starter scenarios — each must build cleanly and have a triagable target
 # ---------------------------------------------------------------------------

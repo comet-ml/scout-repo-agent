@@ -123,23 +123,50 @@ def make_tools(
             return opik.track(type="tool", project_name=opik_project)(fn)
         return fn
 
+    def _error(exception_type: str, message: str) -> str:
+        """Record a tool failure on the current Opik span and return the message
+        for the model. Tools hand failures back as strings instead of raising, so
+        without this the span would be recorded as a success."""
+        if opik_project:
+            opik_context.update_current_span(
+                error_info={
+                    "exception_type": exception_type,
+                    "message": message,
+                    # No exception was raised, so there is no real traceback.
+                    "traceback": message,
+                }
+            )
+        return message
+
     @_track
     def search_issues(query: str, max_results: int = 10) -> str:
-        return json.dumps(provider.search_issues(query, max_results), indent=2)
+        results = provider.search_issues(query, max_results)
+        if len(results) == 1 and "error" in results[0]:
+            return _error("SearchError", f"Error: {results[0]['error']}")
+        return json.dumps(results, indent=2)
 
     @_track
     def list_directory(path: str = "") -> str:
-        return json.dumps(provider.list_directory(path), indent=2)
+        entries = provider.list_directory(path)
+        if len(entries) == 1 and entries[0].startswith("Error:"):
+            return _error("DirectoryReadError", entries[0])
+        return json.dumps(entries, indent=2)
 
     @_track
     def get_file_contents(path: str) -> str:
         if ".." in path:
-            return "Error: path traversal not allowed"
-        return provider.get_file_contents(path)
+            return _error("PathTraversalError", "Error: path traversal not allowed")
+        text = provider.get_file_contents(path)
+        if text.startswith("Error:"):
+            return _error("FileReadError", text)
+        return text
 
     @_track
     def apply_label(label_name: str) -> str:
-        return provider.apply_label(issue_number, label_name)
+        result = provider.apply_label(issue_number, label_name)
+        if result.startswith("Error"):
+            return _error("LabelError", result)
+        return result
 
     return {
         "search_issues": search_issues,

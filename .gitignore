@@ -1,4 +1,6 @@
-.env
+# Credentials — also catches editor backups like .env~ and .env.local
+.env*
+!.env.example
 *.pyc
 __pycache__/
 .pytest_cache/

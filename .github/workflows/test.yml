@@ -48,7 +48,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
         env:
-          SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG || 'Escalated request' }}
+          SCOUT_ESCALATION_TAG: ${{ vars.SCOUT_ESCALATION_TAG || 'Escalated-request' }}
           SCOUT_GITHUB_REPO_OWNER: ${{ vars.SCOUT_GITHUB_REPO_OWNER }}
           SCOUT_GITHUB_REPO_NAME: ${{ vars.SCOUT_GITHUB_REPO_NAME }}
           OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}

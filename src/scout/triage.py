@@ -39,7 +39,7 @@ def _require(name: str) -> str:
 
 ANTHROPIC_API_KEY = _require("ANTHROPIC_API_KEY")
 GITHUB_TOKEN = _require("GITHUB_TOKEN")
-SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated request").strip()
+SCOUT_ESCALATION_TAG = os.environ.get("SCOUT_ESCALATION_TAG", "Escalated-request").strip()
 SCOUT_SYSTEM_PROMPT_OVERRIDE = os.environ.get("SCOUT_SYSTEM_PROMPT", "").strip()
 SCOUT_PROMPT_FILE = os.environ.get("SCOUT_PROMPT_FILE", "").strip()
 # Scout always sources its system prompt from Opik. SCOUT_OPIK_PROMPT_NAME names

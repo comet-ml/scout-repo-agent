@@ -28,7 +28,7 @@ In your repository settings, add:
 |---|---|
 | `SCOUT_GITHUB_REPO_OWNER` | Repository owner (e.g. `comet-ml`) |
 | `SCOUT_GITHUB_REPO_NAME` | Repository name (e.g. `opik`) |
-| `SCOUT_ESCALATION_TAG` | Label name for escalated issues (e.g. `Escalated request`) |
+| `SCOUT_ESCALATION_TAG` | Label name for escalated issues (e.g. `Escalated-request`) |
 | `OPIK_WORKSPACE` | Opik workspace name |
 
 ### 2. Add the workflow
@@ -91,7 +91,7 @@ The GitHub App must have these permissions:
 | `GITHUB_TOKEN` | yes | GitHub token — pass `${{ github.token }}` via the action input |
 | `SCOUT_GITHUB_REPO_OWNER` | yes | Repo owner login |
 | `SCOUT_GITHUB_REPO_NAME` | yes | Repo name |
-| `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated request`) |
+| `SCOUT_ESCALATION_TAG` | no | Label for escalated issues (default: `Escalated-request`) |
 | `OPIK_API_KEY` | **yes** | Opik API key. Opik is required — Scout sources its system prompt from Opik and traces every run there. |
 | `OPIK_WORKSPACE` | **yes** | Opik workspace name |
 | `OPIK_ENVIRONMENT` | no | Tags traces by environment in the Opik UI **and** determines which prompt version Scout fetches (see [Prompt version resolution](#prompt-version-resolution)). Convention: `dev` (local), `test` (test suite — set automatically), `staging` (UAT), `prod` (GitHub Action). |

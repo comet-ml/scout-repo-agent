@@ -127,7 +127,7 @@ class TestLoadSystemPrompt:
             REPO_OWNER="test-owner",
             REPO_NAME="test-repo",
             OPIK_PROJECT="scout:test-owner/test-repo",
-            SCOUT_ESCALATION_TAG="Escalated request",
+            SCOUT_ESCALATION_TAG="Escalated-request",
         )
         defaults.update(overrides)
         # Always explicitly control OPIK_ENVIRONMENT so shell env vars don't
@@ -339,14 +339,14 @@ class TestGitHubProviderApplyLabel:
 
     def test_creates_label_on_422(self):
         self.mock_issue.add_to_labels.side_effect = [_github_exc(422), None]
-        result = self.provider.apply_label(42, "Escalated request")
-        self.provider._repo.create_label.assert_called_once_with("Escalated request", "e11d48")
+        result = self.provider.apply_label(42, "Escalated-request")
+        self.provider._repo.create_label.assert_called_once_with("Escalated-request", "e11d48")
         assert "created and applied" in result
 
     def test_returns_error_when_create_also_fails(self):
         self.mock_issue.add_to_labels.side_effect = _github_exc(422)
         self.provider._repo.create_label.side_effect = _github_exc(403, "Forbidden")
-        result = self.provider.apply_label(42, "Escalated request")
+        result = self.provider.apply_label(42, "Escalated-request")
         assert "Error creating label" in result
         assert "Forbidden" in result
 
@@ -367,16 +367,16 @@ class TestGitHubProviderEnsureLabel:
         self.provider = _make_github_provider()
 
     def test_returns_exists_without_creating(self):
-        self.provider._repo.get_labels.return_value = [_label("bug"), _label("Escalated request")]
-        result = self.provider.ensure_label("Escalated request")
+        self.provider._repo.get_labels.return_value = [_label("bug"), _label("Escalated-request")]
+        result = self.provider.ensure_label("Escalated-request")
         assert result == "exists"
         self.provider._repo.create_label.assert_not_called()
 
     def test_creates_when_missing(self):
         self.provider._repo.get_labels.return_value = [_label("bug")]
-        result = self.provider.ensure_label("Escalated request")
+        result = self.provider.ensure_label("Escalated-request")
         assert result == "created"
-        self.provider._repo.create_label.assert_called_once_with("Escalated request", "e11d48")
+        self.provider._repo.create_label.assert_called_once_with("Escalated-request", "e11d48")
 
 
 # ---------------------------------------------------------------------------
@@ -570,9 +570,9 @@ class TestGitHubSimulator:
 
     def test_apply_label_mutates_state(self):
         sim = GitHubSimulator().add_issue(7, title="t", body="b")
-        sim.apply_label(7, "Escalated request")
-        assert "Escalated request" in sim.issue(7)["labels"]
-        assert ("apply_label", 7, "Escalated request") in sim.calls
+        sim.apply_label(7, "Escalated-request")
+        assert "Escalated-request" in sim.issue(7)["labels"]
+        assert ("apply_label", 7, "Escalated-request") in sim.calls
 
     def test_apply_label_dedupes(self):
         sim = GitHubSimulator().add_issue(7, title="t", body="b", labels=["bug"])
@@ -792,8 +792,8 @@ class TestMakeTools:
     def test_apply_label_uses_bound_issue_number(self):
         # The tool dispatch only passes label_name; issue number was bound at
         # make_tools() time.
-        self.tools["apply_label"]("Escalated request")
-        assert "Escalated request" in self.sim.issue(42)["labels"]
+        self.tools["apply_label"]("Escalated-request")
+        assert "Escalated-request" in self.sim.issue(42)["labels"]
 
 
 # ---------------------------------------------------------------------------

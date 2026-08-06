@@ -81,7 +81,7 @@ def triage_issue(
     prompt_version: str = "",
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-    escalation_tag: str = "Escalated request",
+    escalation_tag: str = "Escalated-request",
 ) -> str:
     """Triage a simulated GitHub issue and return the comment Scout would post.
 
@@ -119,7 +119,7 @@ def triage_issue(
             (prompt_project or "").strip() or "scout:comet-ml/opik",
             (prompt_version or "").strip(),
         ),
-        escalation_tag=(escalation_tag or "").strip() or "Escalated request",
+        escalation_tag=(escalation_tag or "").strip() or "Escalated-request",
         repo_owner=sim.owner,
         repo_name=sim.name,
         opik_project=PROJECT,

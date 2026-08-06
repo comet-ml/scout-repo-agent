@@ -68,7 +68,7 @@ sim = (
 Four properties make this more than a dict:
 
 1. **Default search is realistic.** `search_issues` performs substring matching against title + body, not "return everything". Scenarios can probe Scout's query-formulation behavior — "the right duplicate exists, but only if Scout searches with the right terms."
-2. **State is mutable and observable.** `apply_label` actually changes the issue's `labels` list. Assertions can ask state questions ("is 'Escalated request' on issue #999 now?"), not just call-log questions ("was apply_label invoked?"). `sim.issue(999)["labels"]` returns the live state.
+2. **State is mutable and observable.** `apply_label` actually changes the issue's `labels` list. Assertions can ask state questions ("is 'Escalated-request' on issue #999 now?"), not just call-log questions ("was apply_label invoked?"). `sim.issue(999)["labels"]` returns the live state.
 3. **Behavior is swappable per scenario.** `sim.set_search_handler(fn)` overrides the default matcher with a callable of `(query, max_results, issues) -> list[dict]`. Use for flaky search, pagination quirks, results-after-N-calls — anything you can express in Python.
 4. **Side effects are recorded.** Every mutating call is appended to `sim.calls` as a tuple. The eval driver surfaces a filtered view of this so LLM judges can grade "did Scout apply the label?" or "what search queries did it issue?".
 
@@ -187,7 +187,7 @@ Each Opik Test Suite item has three top-level keys:
   "assertions": [
     "The response references issue #412 as a related or duplicate issue.",
     "The response identifies src/distributed/all_reduce.py as where the bug lives.",
-    "final_labels does not contain 'Escalated request'.",
+    "final_labels does not contain 'Escalated-request'.",
     "search_queries contains at least one query mentioning 'gpu', 'multi', 'hang', or 'deadlock'."
   ]
 }
@@ -244,7 +244,7 @@ A fresh `GitHubSimulator` is built per item from its `spec`. The agent runs end-
 Assertions can reference any of these. Examples:
 
 - *"Output cites issue #412 as a duplicate"* — judges read `output`.
-- *"`final_labels` contains 'Escalated request'"* — judges read `final_labels`.
+- *"`final_labels` contains 'Escalated-request'"* — judges read `final_labels`.
 - *"`search_queries` includes at least one query that mentions 'gpu' or 'deadlock'"* — probes query formulation, which is a real Scout failure mode.
 
 ## Opik tracing

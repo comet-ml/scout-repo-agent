@@ -117,7 +117,7 @@ _SIMPLE_DUPLICATE = {
     "assertions": [
         "The response references issue #412 as a related or duplicate issue.",
         "The response identifies src/distributed/all_reduce.py as where the bug lives.",
-        "final_labels does not contain 'Escalated request'.",
+        "final_labels does not contain 'Escalated-request'.",
         "The response includes a Solution / Workaround section with the env:// workaround from #412.",
         "search_queries contains at least one query that mentions 'gpu', 'multi', 'hang', or 'deadlock'.",
         "The response notes the gap in test coverage for the multi-GPU path.",
@@ -195,7 +195,7 @@ _CLEAR_BUG_NO_DUPLICATE = {
     "assertions": [
         "The response identifies src/cli.py as the file containing the bug.",
         "The response describes a concrete fix — passing --batch-size as an upper bound to auto_tune_batch_size.",
-        "final_labels does not contain 'Escalated request'.",
+        "final_labels does not contain 'Escalated-request'.",
         "The response includes a Solution / Workaround section.",
         "The response invites the reporter to open a PR with the fix.",
     ],
@@ -266,8 +266,8 @@ _ESCALATION_BREAKING_CHANGE = {
         },
     },
     "assertions": [
-        "final_labels contains 'Escalated request'.",
-        "applied_labels contains 'Escalated request'.",
+        "final_labels contains 'Escalated-request'.",
+        "applied_labels contains 'Escalated-request'.",
         "The response explains that this is a breaking change affecting every existing user config.",
         "The response identifies src/config/loader.py and mentions the broader surface (sweep configs, docs, examples).",
         "The response's Next Steps section mentions the need for a design decision or team review.",
@@ -319,7 +319,7 @@ _SPAM_OFF_TOPIC = {
         "The response notes the issue is unrelated to the project described in the README.",
         "The response does NOT contain a 'Code Investigation' section.",
         "The response does NOT contain a 'Solution / Workaround' section.",
-        "final_labels does not contain 'Escalated request'.",
+        "final_labels does not contain 'Escalated-request'.",
         "The response is brief — five sentences or fewer.",
     ],
 }
@@ -349,7 +349,7 @@ _SEARCH_RATE_LIMITED = {
         "The response begins with the Scout greeting line ('Hi, I'm Scout 🦉').",
         "The response includes all three required sections: Solution / Workaround, Code Investigation, Next Steps.",
         "The response identifies src/distributed/all_reduce.py as the relevant file (via list_directory / get_file_contents, not via search).",
-        "final_labels does not contain 'Escalated request'.",
+        "final_labels does not contain 'Escalated-request'.",
     ],
 }
 

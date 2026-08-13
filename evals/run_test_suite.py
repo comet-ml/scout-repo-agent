@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 os.environ.setdefault("OPIK_ENVIRONMENT", "test")
 load_dotenv()
 
+from evals import unpinned_prompt_environment  # noqa: E402
 from scout.agent import make_client, run_agent  # noqa: E402
 from scout.providers.scenarios import build  # noqa: E402
 from scout.triage import (  # noqa: E402
@@ -61,7 +62,8 @@ def _experiment_name() -> str:
 
 def make_task():
     client = make_client(ANTHROPIC_API_KEY, opik_project=EVAL_OPIK_PROJECT)
-    system_prompt = load_system_prompt()
+    with unpinned_prompt_environment():
+        system_prompt = load_system_prompt()
 
     def task(item: dict) -> dict:
         data = item.get("data", item)

@@ -11,3 +11,4 @@ dist/
 *.egg-info/
 *.csv
 *.json
+!.github/renovate.json

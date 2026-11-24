@@ -396,14 +396,27 @@ def main() -> None:
         logger.info("Comment posted to issue #%d", issue_number)
     except Exception as e:
         logger.error("Scout failed: %s", e, exc_info=True)
+
+
+        try:
+            provider.apply_label(issue_number, SCOUT_ESCALATION_TAG)
+        except Exception:
+            logger.exception(
+                "Failed to apply escalation label to issue #%d",
+                issue_number,
+            )
+
+            
         try:
             provider.post_comment(
                 issue_number,
                 "Scout encountered an error while analyzing this issue and could not complete triage.\n\n"
-                "Please review this issue manually."
+                f"This issue has been escalated for manual review and tagged"
+                f"`{SCOUT_ESCALATION_TAG}`."
             )
         except Exception:
             pass
+
         sys.exit(1)
     finally:
         if _opik_enabled:

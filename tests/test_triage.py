@@ -320,7 +320,33 @@ class TestLoadSystemPrompt:
         client.create_chat_prompt.side_effect = RuntimeError("boom")
         result = self._call(client, REPO_OWNER="myorg", REPO_NAME="myrepo")
         assert "myorg/myrepo" in result
+        
+# ---------------------------------------------------------------------------
+# main error handling
+# ---------------------------------------------------------------------------
 
+class TestMainErrorHandling:
+    def test_error_escalates_issue(self):
+        provider = MagicMock()
+
+        with patch.object(scout, "_get_issue_number", return_value=42), \
+             patch.object(scout, "GitHubProvider", return_value=provider), \
+             patch.object(scout, "run_agent", side_effect=RuntimeError("agent failed")), \
+             patch.object(scout, "_opik_enabled", False), \
+             pytest.raises(SystemExit) as exc_info:
+
+            scout.main()
+
+        assert exc_info.value.code == 1
+        provider.apply_label.assert_called_once_with(
+            42, scout.SCOUT_ESCALATION_TAG
+        )
+
+        provider.post_comment.assert_called_once()
+        comment = provider.post_comment.call_args.args[1]
+
+        assert "escalated for manual review" in comment
+        assert scout.SCOUT_ESCALATION_TAG in comment
 
 # ---------------------------------------------------------------------------
 # GitHubProvider.apply_label

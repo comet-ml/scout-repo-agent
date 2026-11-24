@@ -38,6 +38,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from evals import unpinned_prompt_environment  # noqa: E402
 from scout.agent import make_client, run_agent  # noqa: E402
 from scout.providers.scenarios import build  # noqa: E402
 from scout.triage import (  # noqa: E402
@@ -114,7 +115,8 @@ def make_eval_task(system_prompt: str):
 def main() -> None:
     opik_client = opik.Opik()
     dataset = opik_client.get_dataset(DATASET_NAME)
-    system_prompt = load_system_prompt()
+    with unpinned_prompt_environment():
+        system_prompt = load_system_prompt()
     prompt_obj = opik_client.get_chat_prompt(name=SCOUT_OPIK_PROMPT_NAME)
 
     experiment_name = _experiment_name()

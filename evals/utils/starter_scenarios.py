@@ -7,17 +7,37 @@ Scout triages this run.
 
 To add a scenario, append to STARTER_SCENARIOS and re-run
 evals/utils/seed_test_suite.py --from-starter.
+
+Fixtures must name the repository Scout is deployed against. Scout's system
+prompt is published to Opik with $repo_owner/$repo_name already resolved (see
+triage._base_system_prompt), and its spam/off-topic rule tells Scout to judge
+each issue against the README. A fixture naming a different repo therefore reads
+as a contradiction: Scout takes the off-topic branch and returns the template
+with zero tool calls, so every assertion grades the template instead of the
+triage. Keep REPO_OWNER/REPO_NAME below in agreement with the deployed prompt.
 """
 from __future__ import annotations
 
+import os
 
-# Shared README used by the trainer-lib scenarios.
-TRAINER_LIB_README = """\
-# trainer-lib
+# Must match the owner/name baked into the published Opik prompt — otherwise
+# every scenario short-circuits to the off-topic template. Defaults mirror
+# .env.example's commented values.
+REPO_OWNER = os.environ.get("SCOUT_GITHUB_REPO_OWNER", "").strip() or "comet-ml"
+REPO_NAME = os.environ.get("SCOUT_GITHUB_REPO_NAME", "").strip() or "opik"
+
+
+# Shared README for the distributed-trainer scenarios. The scenarios keep their
+# PyTorch-trainer domain — only the repo identity tracks the deployment, so the
+# README agrees with the prompt about which repo this is.
+TRAINER_LIB_README = f"""\
+# {REPO_OWNER}/{REPO_NAME}
 
 A lightweight PyTorch trainer for distributed training across multiple GPUs.
 Supports auto-tuning of batch size and learning rate, YAML-based configs,
 and a CLI entry point: `python -m trainer fit --config path/to/config.yaml`.
+
+Issues about training, distributed execution, configs, or the CLI are in scope.
 """
 
 
@@ -31,8 +51,8 @@ _SIMPLE_DUPLICATE = {
         "scenario_id": "simple-duplicate-cite-issue",
         "scenario": "default",
         "spec": {
-            "owner": "trainer-org",
-            "name": "trainer-lib",
+            "owner": REPO_OWNER,
+            "name": REPO_NAME,
             "readme": TRAINER_LIB_README,
             "issues": [
                 {
@@ -115,8 +135,8 @@ _CLEAR_BUG_NO_DUPLICATE = {
         "scenario_id": "clear-bug-no-duplicate",
         "scenario": "default",
         "spec": {
-            "owner": "trainer-org",
-            "name": "trainer-lib",
+            "owner": REPO_OWNER,
+            "name": REPO_NAME,
             "readme": TRAINER_LIB_README,
             "issues": [
                 {
@@ -192,8 +212,8 @@ _ESCALATION_BREAKING_CHANGE = {
         "scenario_id": "escalation-breaking-change",
         "scenario": "default",
         "spec": {
-            "owner": "trainer-org",
-            "name": "trainer-lib",
+            "owner": REPO_OWNER,
+            "name": REPO_NAME,
             "readme": TRAINER_LIB_README,
             "issues": [
                 {
@@ -226,7 +246,8 @@ _ESCALATION_BREAKING_CHANGE = {
                 ),
                 "docs/configuration.md": (
                     "# Configuration\n\n"
-                    "trainer-lib uses YAML for all configuration. See examples/ for templates.\n"
+                    f"{REPO_NAME} uses YAML for all configuration. "
+                    "See examples/ for templates.\n"
                 ),
                 "src/sweep/runner.py": (
                     "from ..config.loader import load_config\n"
@@ -264,8 +285,8 @@ _SPAM_OFF_TOPIC = {
         "scenario_id": "spam-off-topic",
         "scenario": "default",
         "spec": {
-            "owner": "trainer-org",
-            "name": "trainer-lib",
+            "owner": REPO_OWNER,
+            "name": REPO_NAME,
             "readme": TRAINER_LIB_README,
             "issues": [
                 {
@@ -295,7 +316,7 @@ _SPAM_OFF_TOPIC = {
         },
     },
     "assertions": [
-        "The response notes the issue is unrelated to the trainer-lib project.",
+        "The response notes the issue is unrelated to the project described in the README.",
         "The response does NOT contain a 'Code Investigation' section.",
         "The response does NOT contain a 'Solution / Workaround' section.",
         "final_labels does not contain 'Escalated-request'.",
